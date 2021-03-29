@@ -103,7 +103,7 @@ const Tree = struct {
                 assert(tags[item.node] == .end);
                 if (stack.items.len == 0) return;
 
-                const start = tokens[item.last] + @intCast(Node.Index, item.offset);
+                const start = tokens[item.last];
                 const end = tokens[item.node];
                 try tree.renderBlock(start, end, indent, writer);
 

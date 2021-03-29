@@ -136,7 +136,6 @@ pub fn next(self: *Tokenizer) Token {
 
                 else => {
                     token.tag = .text;
-                    self.index += 1;
                     state = .ignore;
                 },
             },
