@@ -8,10 +8,12 @@ const Tokenizer = @import("Tokenizer.zig");
 
 const Parser = @This();
 
+pub const Indent = u16;
 pub const NodeList = std.MultiArrayList(Node);
 pub const Node = struct {
     tag: Tag,
     token: Index,
+    data: Index,
 
     pub const Tag = enum(u8) {
         tag,
@@ -192,26 +194,30 @@ fn parseFencedBlock(p: *Parser) !Node.Index {
         try p.nodes.append(p.gpa, .{
             .tag = .filename,
             .token = file,
+            .data = undefined,
         });
         try p.roots.append(p.gpa, .{ .index = @intCast(Node.Index, p.nodes.len) });
         this = @intCast(Node.Index, p.nodes.len);
         try p.nodes.append(p.gpa, .{
             .tag = .file,
             .token = @intCast(Node.Index, block_start),
+            .data = undefined,
         });
     } else {
         this = @intCast(Node.Index, p.nodes.len);
         try p.nodes.append(p.gpa, .{
             .tag = .block,
             .token = @intCast(Node.Index, block_start),
+            .data = undefined,
         });
     }
 
-    try p.parsePlaceholders(block_start, block_end);
+    try p.parsePlaceholders(block_start, block_end, true);
 
     try p.nodes.append(p.gpa, .{
         .tag = .end,
         .token = @intCast(Node.Index, block_end),
+        .data = undefined,
     });
 
     p.index = block_end + 2;
@@ -221,9 +227,11 @@ fn parseFencedBlock(p: *Parser) !Node.Index {
     return this;
 }
 
-fn parsePlaceholders(p: *Parser, start: usize, end: usize) !void {
+fn parsePlaceholders(p: *Parser, start: usize, end: usize, block: bool) !void {
     const tokens = p.tokens.items(.tag);
+    const starts = p.tokens.items(.start);
     p.index = start;
+    var last = p.index;
     while (mem.indexOfPos(Tokenizer.Token.Tag, tokens[0..end], p.index, &.{.l_chevron})) |found| {
         p.index = found + 1;
         log.debug("search  | {s}", .{@tagName(tokens[found])});
@@ -234,9 +242,18 @@ fn parsePlaceholders(p: *Parser, start: usize, end: usize) !void {
             "          placeholder {} token {} (( {s} ))",
             .{ p.nodes.len, found + 1, name },
         );
+
+        const newline = if (block)
+            2 + (mem.lastIndexOfScalar(Tokenizer.Token.Tag, tokens[0 .. found + 1], .newline) orelse 0)
+        else
+            found + 1;
+
+        const indent = p.text[newline .. found + 1].len;
+
         try p.nodes.append(p.gpa, .{
             .tag = .placeholder,
             .token = @intCast(Node.Index, found + 1),
+            .data = @intCast(Indent, indent),
         });
     }
 }
@@ -255,17 +272,19 @@ fn parseInlineBlock(p: *Parser, start: usize) !Node.Index {
     const this = @intCast(Node.Index, p.nodes.len);
     try p.nodes.append(p.gpa, .{
         .tag = .inline_block,
-        .token = @intCast(Node.Index, start),
+        .token = @intCast(Node.Index, start + 1),
+        .data = undefined,
     });
 
     const end = p.index;
     defer p.index = end;
 
-    try p.parsePlaceholders(start, block_end);
+    try p.parsePlaceholders(start, block_end, false);
 
     try p.nodes.append(p.gpa, .{
         .tag = .end,
         .token = @intCast(Node.Index, block_end),
+        .data = undefined,
     });
 
     log.debug("<< inline block end >>", .{});
@@ -303,6 +322,7 @@ fn parseMetaBlock(p: *Parser) !?Node.Index {
                 try p.nodes.append(p.gpa, .{
                     .tag = .tag,
                     .token = @intCast(Node.Index, p.index - 1),
+                    .data = undefined,
                 });
             },
             .space => {},
