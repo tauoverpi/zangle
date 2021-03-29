@@ -14,6 +14,7 @@ pub fn build(b: *std.build.Builder) void {
     const exe = b.addExecutable("zangle", "src/main.zig");
     exe.setTarget(target);
     exe.setBuildMode(mode);
+    exe.addLibPath("lib/lib.zig");
     exe.install();
 
     const run_cmd = exe.run();
@@ -26,5 +27,5 @@ pub fn build(b: *std.build.Builder) void {
     run_step.dependOn(&run_cmd.step);
 
     const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&b.addTest("src/main.zig").step);
+    test_step.dependOn(&b.addTest("lib/lib.zig").step);
 }
