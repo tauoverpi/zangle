@@ -67,7 +67,12 @@ fn renderBlock(
     }
 }
 
-pub const RenderNode = struct { node: Node.Index, last: usize, offset: usize };
+pub const RenderNode = struct {
+    node: Node.Index,
+    last: usize,
+    offset: usize,
+    indent: Parser.Indent,
+};
 
 pub fn filename(tree: Tree, root: RootIndex) []const u8 {
     const tokens = tree.nodes.items(.token);
@@ -85,25 +90,22 @@ pub fn render(tree: Tree, stack: *std.ArrayList(RenderNode), root: RootIndex, wr
         .node = root.index + 1,
         .last = root.index,
         .offset = 0,
+        .indent = 0,
     });
 
-    var next_indent: Parser.Indent = 0;
     var indent: Parser.Indent = 0;
 
     while (stack.items.len > 0) {
         var index = stack.items.len - 1;
         var item = stack.items[index];
 
-        if (tags[item.node] == .placeholder) {
-            indent = next_indent;
-            next_indent = data[item.node];
-        } else {
+        if (tags[item.node] != .placeholder) {
             assert(tags[item.node] == .end);
             if (stack.items.len == 0) return;
 
             const start = tokens[item.last] + @intCast(Node.Index, item.offset);
             const end = tokens[item.node];
-            try tree.renderBlock(start, end, indent, writer);
+            try tree.renderBlock(start, end, item.indent, writer);
 
             _ = stack.pop();
 
@@ -119,7 +121,7 @@ pub fn render(tree: Tree, stack: *std.ArrayList(RenderNode), root: RootIndex, wr
         const start = tokens[item.last] + @intCast(Node.Index, item.offset);
         const end = tokens[item.node] - 1;
 
-        try tree.renderBlock(start, end, indent, writer);
+        try tree.renderBlock(start, end, item.indent, writer);
 
         for (stack.items) |prev| if (prev.node == node) return error.CycleDetected;
 
@@ -127,6 +129,7 @@ pub fn render(tree: Tree, stack: *std.ArrayList(RenderNode), root: RootIndex, wr
             .node = node + 1,
             .last = node,
             .offset = 0,
+            .indent = data[item.node],
         });
     }
 }

@@ -1,0 +1,3 @@
+[submodule "extern/zig-args"]
+	path = extern/zig-args
+	url = git@github.com:masterq32/zig-args

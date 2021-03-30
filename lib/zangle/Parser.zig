@@ -224,11 +224,11 @@ fn parsePlaceholders(p: *Parser, start: usize, end: usize, block: bool) !void {
         p.expect(.r_chevron) catch continue;
 
         const newline = if (block)
-            2 + (mem.lastIndexOfScalar(Tokenizer.Token.Tag, tokens[0 .. found + 1], .newline) orelse 0)
+            (mem.lastIndexOfScalar(Tokenizer.Token.Tag, tokens[0..found], .newline) orelse 0)
         else
-            found + 1;
+            found;
 
-        const indent = p.text[newline .. found + 1].len;
+        const indent = p.text[starts[newline + 1].index..starts[found].index].len;
 
         try p.nodes.append(p.gpa, .{
             .tag = .placeholder,
