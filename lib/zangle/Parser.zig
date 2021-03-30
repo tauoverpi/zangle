@@ -183,7 +183,7 @@ fn parseFencedBlock(p: *Parser) !Node.Index {
         }
     } else return error.FenceNotClosed;
 
-    const block_end = p.index - 1;
+    const block_end = p.index;
 
     var this: Node.Index = undefined;
 
