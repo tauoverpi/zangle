@@ -61,7 +61,6 @@ fn renderBlock(
     const tokens = tree.tokens.items(.tag);
     for (tokens[start..end]) |token, i| {
         try writer.writeAll(tree.getTokenSlice(start + @intCast(Node.Index, i)));
-        std.log.debug("token {}", .{token});
         if (token == .newline and i != end - start) {
             try writer.writeByteNTimes(' ', indent);
         }
@@ -77,8 +76,6 @@ pub fn filename(tree: Tree, root: RootIndex) []const u8 {
 }
 
 pub fn render(tree: Tree, stack: *std.ArrayList(RenderNode), root: RootIndex, writer: anytype) !void {
-    const log = std.log.scoped(.render);
-
     const tags = tree.nodes.items(.tag);
     const tokens = tree.nodes.items(.token);
     const starts = tree.tokens.items(.start);
@@ -96,10 +93,6 @@ pub fn render(tree: Tree, stack: *std.ArrayList(RenderNode), root: RootIndex, wr
     while (stack.items.len > 0) {
         var index = stack.items.len - 1;
         var item = stack.items[index];
-        std.log.debug("depth {} item {}", .{
-            stack.items.len,
-            item,
-        });
 
         if (tags[item.node] == .placeholder) {
             indent = next_indent;

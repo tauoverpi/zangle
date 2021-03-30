@@ -48,8 +48,6 @@ nodes: NodeList,
 roots: RootList,
 name_map: NameMap,
 
-const log = std.log.scoped(.parser);
-
 pub fn init(gpa: *Allocator, text: []const u8) !Parser {
     var tokens = TokenList{};
 
@@ -91,20 +89,16 @@ fn getToken(p: Parser, index: usize) !Tokenizer.Token {
 fn expect(p: *Parser, tag: Tokenizer.Token.Tag) !void {
     defer p.index += 1;
     if (p.peek() != tag) {
-        log.debug("expected {s} found {s}", .{ @tagName(tag), @tagName(p.peek().?) });
         return error.UnexpectedToken;
     }
-    log.debug("expect  | {s}", .{@tagName(tag)});
 }
 
 fn get(p: *Parser, tag: Tokenizer.Token.Tag) ![]const u8 {
     defer p.index += 1;
     if (p.peek() != tag) {
-        log.debug("expected {s} found {s}", .{ @tagName(tag), @tagName(p.peek().?) });
         return error.UnexpectedToken;
     }
     const slice = p.getTokenSlice(p.index);
-    log.debug("get     | {s} (( {s} ))", .{ @tagName(tag), slice });
     return slice;
 }
 
@@ -115,7 +109,6 @@ fn getTokenSlice(p: Parser, index: usize) []const u8 {
 
 fn consume(p: *Parser) !Tokenizer.Token.Tag {
     const token = p.peek() orelse return error.OutOfBounds;
-    log.debug("consume | {s}", .{@tagName(token)});
     p.index += 1;
     return token;
 }
@@ -131,7 +124,6 @@ pub fn resolve(p: *Parser) !void {
             .inline_block => |start| try p.parseInlineBlock(start),
             .fenced_block => try p.parseFencedBlock(),
         };
-        log.debug("          block {}", .{node});
         try p.addTagNames(node);
     }
 }
@@ -164,14 +156,11 @@ fn addTagNames(p: *Parser, block: Node.Index) !void {
 fn parseFencedBlock(p: *Parser) !Node.Index {
     const tokens = p.tokens.items(.tag);
     const fence = p.get(.fence) catch unreachable;
-    log.debug("<< fenced block meta >>", .{});
 
     const reset = p.nodes.len;
     errdefer p.nodes.shrinkRetainingCapacity(reset);
 
     const filename = try p.parseMetaBlock();
-
-    log.debug("<< fenced block start >>", .{});
 
     const block_start = p.index + 1;
 
@@ -221,8 +210,6 @@ fn parseFencedBlock(p: *Parser) !Node.Index {
 
     p.index = block_end + 2;
 
-    log.debug("<< fenced block end >>", .{});
-
     return this;
 }
 
@@ -233,14 +220,8 @@ fn parsePlaceholders(p: *Parser, start: usize, end: usize, block: bool) !void {
     var last = p.index;
     while (mem.indexOfPos(Tokenizer.Token.Tag, tokens[0..end], p.index, &.{.l_chevron})) |found| {
         p.index = found + 1;
-        log.debug("search  | {s}", .{@tagName(tokens[found])});
         const name = p.get(.identifier) catch continue;
         p.expect(.r_chevron) catch continue;
-
-        log.debug(
-            "          placeholder {} token {} (( {s} ))",
-            .{ p.nodes.len, found + 1, name },
-        );
 
         const newline = if (block)
             2 + (mem.lastIndexOfScalar(Tokenizer.Token.Tag, tokens[0 .. found + 1], .newline) orelse 0)
@@ -260,13 +241,11 @@ fn parsePlaceholders(p: *Parser, start: usize, end: usize, block: bool) !void {
 fn parseInlineBlock(p: *Parser, start: usize) !Node.Index {
     const block_end = p.index;
     p.expect(.fence) catch unreachable;
-    log.debug("<< inline block meta >>", .{});
 
     const reset = p.nodes.len;
     errdefer p.nodes.shrinkRetainingCapacity(reset);
 
     if ((try p.parseMetaBlock()) != null) return error.InlineFileBlock;
-    log.debug("<< inline block start >>", .{});
 
     const this = @intCast(Node.Index, p.nodes.len);
     try p.nodes.append(p.gpa, .{
@@ -285,8 +264,6 @@ fn parseInlineBlock(p: *Parser, start: usize) !Node.Index {
         .token = @intCast(Node.Index, block_end),
         .data = undefined,
     });
-
-    log.debug("<< inline block end >>", .{});
 
     return this;
 }
