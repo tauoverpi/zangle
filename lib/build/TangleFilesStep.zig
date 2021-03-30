@@ -63,7 +63,7 @@ fn make(step: *Step) !void {
     for (tree.roots) |root| {
         const filename = self.builder.pathFromRoot(tree.filename(root));
         if (fs.path.dirname(filename)) |dir| try self.builder.makePath(dir);
-        var file = try fs.cwd().openFile(filename, .{ .write = true });
+        var file = try fs.cwd().createFile(filename, .{ .truncate = true });
         defer file.close();
         try tree.render(&stack, root, file.writer());
     }
