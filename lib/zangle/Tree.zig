@@ -121,30 +121,28 @@ pub fn render(tree: Tree, stack: *std.ArrayList(RenderNode), root: RootIndex, wr
                     .trail = &.{},
                 });
             }
+        } else {
+            stack.items[index].node = item.node + 1;
+            stack.items[index].last = item.node;
+            stack.items[index].offset = 2;
 
-            continue;
+            const slice = tree.getTokenSlice(tokens[item.node]);
+            const node = tree.name_map.get(slice) orelse return error.UnboundPlaceholder;
+            const start = tokens[item.last] + @intCast(Node.Index, item.offset);
+            const end = tokens[item.node] - 1;
+
+            try tree.renderBlock(start, end, item.indent, writer);
+
+            for (stack.items) |prev| if (prev.node == node.head) return error.CycleDetected;
+
+            try stack.append(.{
+                .node = node.head + 1,
+                .last = node.head,
+                .offset = 0,
+                .indent = data[item.node],
+                .trail = node.trail.items,
+            });
         }
-
-        stack.items[index].node = item.node + 1;
-        stack.items[index].last = item.node;
-        stack.items[index].offset = 2;
-
-        const slice = tree.getTokenSlice(tokens[item.node]);
-        const node = tree.name_map.get(slice) orelse return error.UnboundPlaceholder;
-        const start = tokens[item.last] + @intCast(Node.Index, item.offset);
-        const end = tokens[item.node] - 1;
-
-        try tree.renderBlock(start, end, item.indent, writer);
-
-        for (stack.items) |prev| if (prev.node == node.head) return error.CycleDetected;
-
-        try stack.append(.{
-            .node = node.head + 1,
-            .last = node.head,
-            .offset = 0,
-            .indent = data[item.node],
-            .trail = node.trail.items,
-        });
     }
 }
 
