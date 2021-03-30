@@ -12,6 +12,7 @@ const NodeList = Parser.NodeList;
 const Node = Parser.Node;
 const RootIndex = Parser.RootIndex;
 const NameMap = Parser.NameMap;
+const Name = Parser.Name;
 
 pub const Tree = @This();
 text: []const u8,
@@ -44,11 +45,11 @@ pub fn getTokenSlice(tree: Tree, index: Node.Index) []const u8 {
     return tree.text[token.data.start..token.data.end];
 }
 
-pub fn deinit(d: *Tree, gpa: *Allocator) void {
-    d.tokens.deinit(gpa);
-    d.nodes.deinit(gpa);
-    gpa.free(d.roots);
-    d.name_map.deinit(gpa);
+pub fn deinit(tree: *Tree, gpa: *Allocator) void {
+    tree.tokens.deinit(gpa);
+    tree.nodes.deinit(gpa);
+    gpa.free(tree.roots);
+    tree.name_map.deinit(gpa);
 }
 
 fn renderBlock(
@@ -72,6 +73,7 @@ pub const RenderNode = struct {
     last: usize,
     offset: usize,
     indent: Parser.Indent,
+    trail: []Node.Index,
 };
 
 pub fn filename(tree: Tree, root: RootIndex) []const u8 {
@@ -91,6 +93,7 @@ pub fn render(tree: Tree, stack: *std.ArrayList(RenderNode), root: RootIndex, wr
         .last = root.index,
         .offset = 0,
         .indent = 0,
+        .trail = &.{},
     });
 
     var indent: Parser.Indent = 0;
@@ -109,6 +112,16 @@ pub fn render(tree: Tree, stack: *std.ArrayList(RenderNode), root: RootIndex, wr
 
             _ = stack.pop();
 
+            for (item.trail) |trail| {
+                try stack.append(.{
+                    .node = trail + 1,
+                    .last = trail,
+                    .indent = indent,
+                    .offset = 0,
+                    .trail = &.{},
+                });
+            }
+
             continue;
         }
 
@@ -123,13 +136,14 @@ pub fn render(tree: Tree, stack: *std.ArrayList(RenderNode), root: RootIndex, wr
 
         try tree.renderBlock(start, end, item.indent, writer);
 
-        for (stack.items) |prev| if (prev.node == node) return error.CycleDetected;
+        for (stack.items) |prev| if (prev.node == node.head) return error.CycleDetected;
 
         try stack.append(.{
-            .node = node + 1,
-            .last = node,
+            .node = node.head + 1,
+            .last = node.head,
             .offset = 0,
             .indent = data[item.node],
+            .trail = node.trail.items,
         });
     }
 }

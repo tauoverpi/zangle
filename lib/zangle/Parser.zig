@@ -3,6 +3,7 @@ const mem = std.mem;
 const assert = std.debug.assert;
 const testing = std.testing;
 const Allocator = std.mem.Allocator;
+const ArrayListUnmanaged = std.ArrayListUnmanaged;
 
 const Tokenizer = @import("Tokenizer.zig");
 
@@ -37,8 +38,10 @@ pub const Token = struct {
 pub const TokenList = std.MultiArrayList(Token);
 
 pub const RootIndex = struct { index: Node.Index };
-pub const RootList = std.ArrayListUnmanaged(RootIndex);
-pub const NameMap = std.StringHashMapUnmanaged(Node.Index);
+pub const RootList = ArrayListUnmanaged(RootIndex);
+pub const NameMap = std.StringHashMapUnmanaged(Name);
+pub const Name = struct { head: Node.Index, trail: Trail };
+pub const Trail = ArrayListUnmanaged(Node.Index);
 
 text: []const u8,
 gpa: *Allocator,
@@ -140,8 +143,14 @@ fn addTagNames(p: *Parser, block: Node.Index) !void {
                 .tag => {
                     const name = p.getTokenSlice(tokens[i]);
                     const result = try p.name_map.getOrPut(p.gpa, name);
-                    if (result.found_existing) return error.NameConflict;
-                    result.entry.value = block;
+                    if (result.found_existing) {
+                        try result.entry.value.trail.append(p.gpa, block);
+                    } else {
+                        result.entry.value = .{
+                            .head = block,
+                            .trail = Trail{},
+                        };
+                    }
                 },
                 // no other type of node found above belongs to the given
                 // block thus this is a safe assumption
@@ -268,7 +277,7 @@ fn parseInlineBlock(p: *Parser, start: usize) !Node.Index {
     return this;
 }
 
-/// Parse the metau data block which follows a fence and
+/// Parse the meta data block which follows a fence and
 /// allocate nodes for each tag found.
 fn parseMetaBlock(p: *Parser) !?Node.Index {
     p.expect(.l_brace) catch unreachable;
