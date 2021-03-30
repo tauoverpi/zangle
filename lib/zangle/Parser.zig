@@ -313,7 +313,7 @@ fn parseMetaBlock(p: *Parser) !?Node.Index {
                 if (mem.eql(u8, "file", key)) {
                     if (file != null) return error.MultipleTargets;
                     if (string.len <= 2) return error.InvalidFileName;
-                    file = @intCast(Node.Index, p.index - 3);
+                    file = @intCast(Node.Index, p.index - 1);
                 }
             },
             .hash => {
