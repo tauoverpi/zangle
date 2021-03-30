@@ -59,7 +59,6 @@ const Tree = struct {
         writer: anytype,
     ) !void {
         const tokens = tree.tokens.items(.tag);
-        testing.log_level = .debug;
         for (tokens[start..end]) |token, i| {
             try writer.writeAll(tree.getTokenSlice(start + @intCast(Node.Index, i)));
             std.log.debug("token {}", .{token});
@@ -103,7 +102,7 @@ const Tree = struct {
                 assert(tags[item.node] == .end);
                 if (stack.items.len == 0) return;
 
-                const start = tokens[item.last];
+                const start = tokens[item.last] + @intCast(Node.Index, item.offset);
                 const end = tokens[item.node];
                 try tree.renderBlock(start, end, indent, writer);
 

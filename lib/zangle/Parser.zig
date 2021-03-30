@@ -163,30 +163,29 @@ fn addTagNames(p: *Parser, block: Node.Index) !void {
 
 fn parseFencedBlock(p: *Parser) !Node.Index {
     const tokens = p.tokens.items(.tag);
-    const fence = (p.get(.fence) catch unreachable).len;
+    const fence = p.get(.fence) catch unreachable;
     log.debug("<< fenced block meta >>", .{});
 
     const reset = p.nodes.len;
     errdefer p.nodes.shrinkRetainingCapacity(reset);
 
     const filename = try p.parseMetaBlock();
-    try p.expect(.newline);
 
     log.debug("<< fenced block start >>", .{});
 
-    const block_start = p.index;
+    const block_start = p.index + 1;
 
     // find the closing fence
     while (mem.indexOfPos(Tokenizer.Token.Tag, tokens, p.index, &.{ .newline, .fence })) |found| {
-        if (p.getTokenSlice(found + 1).len == fence) {
-            p.index = found + 2;
+        if (mem.eql(u8, fence, p.getTokenSlice(found + 1))) {
+            p.index = found + 1;
             break;
         } else {
-            p.index = found + 2;
+            p.index = found + 1;
         }
     } else return error.FenceNotClosed;
 
-    const block_end = p.index - 2;
+    const block_end = p.index - 1;
 
     var this: Node.Index = undefined;
 
@@ -272,7 +271,7 @@ fn parseInlineBlock(p: *Parser, start: usize) !Node.Index {
     const this = @intCast(Node.Index, p.nodes.len);
     try p.nodes.append(p.gpa, .{
         .tag = .inline_block,
-        .token = @intCast(Node.Index, start + 1),
+        .token = @intCast(Node.Index, start - 1),
         .data = undefined,
     });
 
@@ -377,13 +376,19 @@ fn findStartOfBlock(p: *Parser) ?Block {
                 // found the start of the block thus we return the start to avoid
                 // searcing for it again
                 p.index = block;
-                return Block{ .inline_block = start };
+                return Block{ .inline_block = start + 2 };
             } else {
                 // not a passable codeblock, skip it and keep searching
                 p.index = block + 1;
             }
         }
     } else return null;
+}
+
+fn testParse(input: []const u8) !void {
+    var p = try Parser.init(std.testing.allocator, input);
+    try p.resolve();
+    defer p.deinit();
 }
 
 test "parse simple" {
@@ -426,4 +431,22 @@ test "parse simple" {
     testing.expectEqual(Tokenizer.Token.Tag.l_chevron, tags[node_tokens[root.index + 1] - 1]);
     testing.expectEqual(Tokenizer.Token.Tag.l_chevron, tags[node_tokens[root.index + 2] - 1]);
     testing.expectEqual(root.index + 5, p.name_map.get("that").?);
+}
+
+test "fences" {
+    try testParse(
+        \\```{.zig file="render.zig"}
+        \\```
+    );
+
+    try testParse(
+        \\```{.zig file="render.zig"}
+        \\const <<tree-type>> = struct {};
+        \\// A
+        \\```
+        \\
+        \\```{.zig file="parse.zig"}
+        \\const <<tree-type>> = struct {};
+        \\```
+    );
 }
