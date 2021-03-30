@@ -1,5 +1,6 @@
 const std = @import("std");
 const mem = std.mem;
+const meta = std.meta;
 const assert = std.debug.assert;
 const testing = std.testing;
 const Allocator = std.mem.Allocator;
@@ -42,6 +43,10 @@ pub const RootList = ArrayListUnmanaged(RootIndex);
 pub const NameMap = std.StringHashMapUnmanaged(Name);
 pub const Name = struct { head: Node.Index, trail: Trail };
 pub const Trail = ArrayListUnmanaged(Node.Index);
+pub const Delimiter = enum {
+    chevron,
+    brace,
+};
 
 text: []const u8,
 gpa: *Allocator,
@@ -50,6 +55,7 @@ tokens: TokenList.Slice,
 nodes: NodeList,
 roots: RootList,
 name_map: NameMap,
+delimiter: Delimiter = .chevron,
 
 pub fn init(gpa: *Allocator, text: []const u8) !Parser {
     var tokens = TokenList{};
@@ -123,10 +129,12 @@ fn peek(p: Parser) ?Tokenizer.Token.Tag {
 
 pub fn resolve(p: *Parser) !void {
     while (p.findStartOfBlock()) |tag| {
+        const delimiter = p.delimiter;
         const node = switch (tag) {
             .inline_block => |start| try p.parseInlineBlock(start),
             .fenced_block => try p.parseFencedBlock(),
         };
+        p.delimiter = delimiter;
         try p.addTagNames(node);
     }
 }
@@ -230,7 +238,12 @@ fn parsePlaceholders(p: *Parser, start: usize, end: usize, block: bool) !void {
     while (mem.indexOfPos(Tokenizer.Token.Tag, tokens[0..end], p.index, &.{.l_chevron})) |found| {
         p.index = found + 1;
         const name = p.get(.identifier) catch continue;
-        p.expect(.r_chevron) catch continue;
+        const chev = p.get(.r_chevron) catch continue;
+
+        switch (p.delimiter) {
+            .chevron => if (!mem.eql(u8, ">>", chev)) continue,
+            .brace => if (!mem.eql(u8, "}}", chev)) continue,
+        }
 
         const newline = if (block)
             (mem.lastIndexOfScalar(Tokenizer.Token.Tag, tokens[0..found], .newline) orelse 0)
@@ -300,6 +313,9 @@ fn parseMetaBlock(p: *Parser) !?Node.Index {
                     if (file != null) return error.MultipleTargets;
                     if (string.len <= 2) return error.InvalidFileName;
                     file = @intCast(Node.Index, p.index - 1);
+                } else if (mem.eql(u8, "delimiter", key)) {
+                    p.delimiter = meta.stringToEnum(Delimiter, string) orelse
+                        return error.InvalidDelimiter;
                 }
             },
             .hash => {
