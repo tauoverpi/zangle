@@ -6,11 +6,14 @@ geometry:
 pagestyle: headings
 links-as-notes: true
 papersize: a4
-abstract: |
-  Zangle is a tool and a library for extracting executable segments of code from
-  documentation into runnable source code while being compatible with [pandoc]
-  similar to [entangled].
 ...
+
+# Abstract
+
+Zangle is a tool and a library for extracting executable segments of code from
+documentation into runnable source code while being compatible with [pandoc]
+similar to [entangled].
+
 
 # Configuration
 
