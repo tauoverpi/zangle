@@ -12,8 +12,15 @@ papersize: a4
 
 Zangle is a tool and a library for extracting executable segments of code from
 documentation into runnable source code while being compatible with [pandoc]
-similar to [entangled].
+similar to [entangled] with integration with the Zig build system.
 
+TODO:
+
+- [ ] weave - remove constructs github markdown doesn't support
+- [ ] weave - doctest rendering
+- [ ] doctest - custom command runners
+- [ ] doctest - expected output test
+- [ ] remove this list once all entries have been resolved and switch to issues
 
 # Configuration
 
