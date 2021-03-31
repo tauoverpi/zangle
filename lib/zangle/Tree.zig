@@ -116,11 +116,12 @@ pub fn render(tree: Tree, stack: *std.ArrayList(RenderNode), root: RootIndex, wr
 
             _ = stack.pop();
 
-            for (item.trail) |trail| {
+            for (item.trail) |_, i| {
+                const trail = item.trail[(item.trail.len - 1) - i];
                 try stack.append(.{
                     .node = trail + 1,
                     .last = trail,
-                    .indent = indent,
+                    .indent = item.indent,
                     .offset = 0,
                     .trail = &.{},
                 });
