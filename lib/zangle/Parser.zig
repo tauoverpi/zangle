@@ -38,12 +38,16 @@ pub const Token = struct {
 
 pub const TokenList = std.MultiArrayList(Token);
 
+pub const DocTest = struct { index: Node.Index };
+pub const DocTestList = ArrayListUnmanaged(DocTest);
 pub const RootIndex = struct { index: Node.Index };
 pub const RootList = ArrayListUnmanaged(RootIndex);
 pub const NameMap = std.StringHashMapUnmanaged(Name);
 pub const Name = struct { head: Node.Index, trail: Trail };
 pub const Trail = ArrayListUnmanaged(Node.Index);
 pub const Delimiter = enum {
+    /// Treat delimiters the same as regular text
+    ignore,
     chevron,
     brace,
 };
@@ -55,6 +59,7 @@ tokens: TokenList.Slice,
 nodes: NodeList,
 roots: RootList,
 name_map: NameMap,
+doctests: DocTestList,
 delimiter: Delimiter = .chevron,
 
 pub fn init(gpa: *Allocator, text: []const u8) !Parser {
@@ -76,6 +81,7 @@ pub fn init(gpa: *Allocator, text: []const u8) !Parser {
         .index = 0,
         .nodes = NodeList{},
         .name_map = NameMap{},
+        .doctests = DocTestList{},
         .gpa = gpa,
         .roots = RootList{},
     };
@@ -85,6 +91,7 @@ pub fn deinit(p: *Parser) void {
     p.tokens.deinit(p.gpa);
     p.nodes.deinit(p.gpa);
     p.roots.deinit(p.gpa);
+    p.doctests.deinit(p.gpa);
     p.name_map.deinit(p.gpa);
     p.* = undefined;
 }
@@ -177,7 +184,7 @@ fn parseFencedBlock(p: *Parser) !Node.Index {
     const reset = p.nodes.len;
     errdefer p.nodes.shrinkRetainingCapacity(reset);
 
-    const filename = try p.parseMetaBlock();
+    const info = try p.parseMetaBlock();
 
     const block_start = p.index + 1;
 
@@ -195,7 +202,7 @@ fn parseFencedBlock(p: *Parser) !Node.Index {
 
     var this: Node.Index = undefined;
 
-    if (filename) |file| {
+    if (info.filename) |file| {
         try p.nodes.append(p.gpa, .{
             .tag = .filename,
             .token = file,
@@ -217,6 +224,10 @@ fn parseFencedBlock(p: *Parser) !Node.Index {
         });
     }
 
+    if (info.doctest) {
+        try p.doctests.append(p.gpa, .{ .index = this });
+    }
+
     try p.parsePlaceholders(block_start, block_end, true);
 
     try p.nodes.append(p.gpa, .{
@@ -230,36 +241,6 @@ fn parseFencedBlock(p: *Parser) !Node.Index {
     return this;
 }
 
-fn parsePlaceholders(p: *Parser, start: usize, end: usize, block: bool) !void {
-    const tokens = p.tokens.items(.tag);
-    const starts = p.tokens.items(.start);
-    p.index = start;
-    var last = p.index;
-    while (mem.indexOfPos(Tokenizer.Token.Tag, tokens[0..end], p.index, &.{.l_chevron})) |found| {
-        p.index = found + 1;
-        const name = p.get(.identifier) catch continue;
-        const chev = p.get(.r_chevron) catch continue;
-
-        switch (p.delimiter) {
-            .chevron => if (!mem.eql(u8, ">>", chev)) continue,
-            .brace => if (!mem.eql(u8, "}}", chev)) continue,
-        }
-
-        const newline = if (block)
-            (mem.lastIndexOfScalar(Tokenizer.Token.Tag, tokens[0..found], .newline) orelse 0)
-        else
-            found;
-
-        const indent = p.text[starts[newline + 1].index..starts[found].index].len;
-
-        try p.nodes.append(p.gpa, .{
-            .tag = .placeholder,
-            .token = @intCast(Node.Index, found + 1),
-            .data = @intCast(Indent, indent),
-        });
-    }
-}
-
 fn parseInlineBlock(p: *Parser, start: usize) !Node.Index {
     const block_end = p.index;
     p.expect(.fence) catch unreachable;
@@ -267,7 +248,9 @@ fn parseInlineBlock(p: *Parser, start: usize) !Node.Index {
     const reset = p.nodes.len;
     errdefer p.nodes.shrinkRetainingCapacity(reset);
 
-    if ((try p.parseMetaBlock()) != null) return error.InlineFileBlock;
+    const info = try p.parseMetaBlock();
+    if (info.filename != null) return error.InlineFileBlock;
+    if (info.doctest) return error.InlineDocTest;
 
     const this = @intCast(Node.Index, p.nodes.len);
     try p.nodes.append(p.gpa, .{
@@ -290,11 +273,17 @@ fn parseInlineBlock(p: *Parser, start: usize) !Node.Index {
     return this;
 }
 
+const Meta = struct {
+    filename: ?Node.Index,
+    doctest: bool,
+};
+
 /// Parse the meta data block which follows a fence and
 /// allocate nodes for each tag found.
-fn parseMetaBlock(p: *Parser) !?Node.Index {
+fn parseMetaBlock(p: *Parser) !Meta {
     p.expect(.l_brace) catch unreachable;
     var file: ?Node.Index = null;
+    var doctest = false;
 
     try p.expect(.dot);
     const language = try p.get(.identifier);
@@ -305,6 +294,15 @@ fn parseMetaBlock(p: *Parser) !?Node.Index {
 
     while (true) {
         switch (try p.consume()) {
+            .dot => {
+                const key = try p.get(.identifier);
+                if (mem.eql(u8, "doctest", key)) {
+                    doctest = true;
+                } else {
+                    // Ignore it, it's probably for pandoc or another filter
+                }
+            },
+
             .identifier => {
                 const key = p.getTokenSlice(p.index - 1);
                 try p.expect(.equal);
@@ -318,6 +316,7 @@ fn parseMetaBlock(p: *Parser) !?Node.Index {
                         return error.InvalidDelimiter;
                 }
             },
+
             .hash => {
                 try p.expect(.identifier);
                 try p.nodes.append(p.gpa, .{
@@ -326,13 +325,45 @@ fn parseMetaBlock(p: *Parser) !?Node.Index {
                     .data = undefined,
                 });
             },
+
             .space => {},
             .r_brace => break,
             else => return error.InvalidMetaBlock,
         }
     }
 
-    return file;
+    return Meta{ .filename = file, .doctest = doctest };
+}
+
+fn parsePlaceholders(p: *Parser, start: usize, end: usize, block: bool) !void {
+    const tokens = p.tokens.items(.tag);
+    const starts = p.tokens.items(.start);
+    p.index = start;
+    var last = p.index;
+    while (mem.indexOfPos(Tokenizer.Token.Tag, tokens[0..end], p.index, &.{.l_chevron})) |found| {
+        p.index = found + 1;
+        const name = p.get(.identifier) catch continue;
+        const chev = p.get(.r_chevron) catch continue;
+
+        switch (p.delimiter) {
+            .ignore => continue,
+            .chevron => if (!mem.eql(u8, ">>", chev)) continue,
+            .brace => if (!mem.eql(u8, "}}", chev)) continue,
+        }
+
+        const newline = if (block)
+            (mem.lastIndexOfScalar(Tokenizer.Token.Tag, tokens[0..found], .newline) orelse 0)
+        else
+            found;
+
+        const indent = p.text[starts[newline + 1].index..starts[found].index].len;
+
+        try p.nodes.append(p.gpa, .{
+            .tag = .placeholder,
+            .token = @intCast(Node.Index, found + 1),
+            .data = @intCast(Indent, indent),
+        });
+    }
 }
 
 const Block = union(enum) {

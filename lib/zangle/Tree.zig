@@ -13,6 +13,8 @@ const Node = Parser.Node;
 const RootIndex = Parser.RootIndex;
 const NameMap = Parser.NameMap;
 const Name = Parser.Name;
+const DocTestList = Parser.DocTestList;
+const DocTest = Parser.DocTest;
 
 pub const Tree = @This();
 text: []const u8,
@@ -21,6 +23,7 @@ tokens: TokenList.Slice,
 nodes: NodeList.Slice,
 roots: []RootIndex,
 name_map: NameMap,
+doctests: []DocTest,
 
 pub fn parse(gpa: *Allocator, text: []const u8) !Tree {
     var p = try Parser.init(gpa, text);
@@ -31,6 +34,7 @@ pub fn parse(gpa: *Allocator, text: []const u8) !Tree {
         .nodes = p.nodes.toOwnedSlice(),
         .roots = p.roots.toOwnedSlice(gpa),
         .name_map = p.name_map,
+        .doctests = p.doctests.toOwnedSlice(gpa),
     };
 }
 

@@ -25,6 +25,7 @@ pub const Token = struct {
         newline,
         text,
         fence,
+        line_fence,
         l_brace,
         r_brace,
         dot,
@@ -103,8 +104,8 @@ pub fn next(self: *Tokenizer) Token {
                     state = .space;
                 },
 
-                '`', '~', ':' => |ch| {
-                    token.tag = .fence;
+                '`', '~', ':', '-' => |ch| {
+                    token.tag = if (ch == '-') .line_fence else .fence;
                     state = .fence;
                     fence = ch;
                 },

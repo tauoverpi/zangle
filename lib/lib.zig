@@ -3,6 +3,7 @@ pub const Tree = @import("zangle/Tree.zig");
 pub const Tokenizer = @import("zangle/Tokenizer.zig");
 pub const build = struct {
     pub const TangleFilesStep = @import("build/TangleFilesStep.zig");
+    pub const DocTestStep = @import("build/DocTestStep.zig");
 };
 
 test {
