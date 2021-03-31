@@ -65,9 +65,16 @@ pub fn build(b: *std.build.Builder) !void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
-    const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(doctest_step);
-    test_step.dependOn(&b.addTest("lib/lib.zig").step);
+    const main_test = b.addTest("src/main.zig");
+    main_test.addPackage(pkgs.zangle);
+
+    const test_step = b.step("test", "Run application unit tests");
+    test_step.dependOn(tangle_step);
+    test_step.dependOn(&main_test.step);
+
+    const lib_test_step = b.step("lib-test", "Run library unit tests");
+    lib_test_step.dependOn(doctest_step);
+    lib_test_step.dependOn(&b.addTest("lib/lib.zig").step);
 }
 
 fn pandoc(b: *Builder, args: []const []const u8) !*RunStep {
