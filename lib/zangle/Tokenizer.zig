@@ -18,6 +18,14 @@ pub const Token = struct {
         end: usize,
     };
 
+    pub fn len(self: Token) usize {
+        return self.data.end - self.data.start;
+    }
+
+    pub fn slice(self: Token, text: []const u8) []const u8 {
+        return text[self.data.start..self.data.end];
+    }
+
     pub const Tag = enum {
         eof,
         invalid,
