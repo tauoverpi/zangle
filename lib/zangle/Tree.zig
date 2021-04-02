@@ -252,6 +252,28 @@ pub fn weaveGithub(tree: Tree, writer: anytype) !void {
     const tokens = tree.nodes.items(.token);
     const source = tree.tokens.items(.tag);
     var state: enum { scan, inline_block } = .scan;
+
+    done: { // remove the title block if it exists
+        const line = mem.indexOf(Tokenizer.Token.Tag, source, &.{.line_fence}) orelse break :done;
+
+        if (line != 0) for (source[0..line]) |token| switch (token) {
+            .newline, .space => {},
+            else => break :done,
+        };
+
+        const dot = mem.indexOf(Tokenizer.Token.Tag, source, &.{ .newline, .dot_fence }) orelse break :done;
+
+        if (line < dot and tokens[0] > dot) {
+
+            //last = tree.getToken(dot + 1).data.end;
+            for (source[dot + 2 ..]) |token, i| switch (token) {
+                .space => {},
+                .newline => last = tree.getToken(dot + i + 2).data.end,
+                else => break,
+            };
+        }
+    }
+
     for (tags) |tag, i| switch (state) {
         .scan => {
             switch (tag) {
@@ -318,9 +340,44 @@ test "weave github" {
         \\```{.zig #a}
         \\```
     ,
-        \\**<<a>>**
+        \\**a**
         \\```zig
         \\```
+    );
+    try testWeave(.github,
+        \\---
+        \\...
+        \\```{.zig #a}
+        \\```
+    ,
+        \\**a**
+        \\```zig
+        \\```
+    );
+    try testWeave(.github,
+        \\---
+        \\...
+        \\
+        \\
+        \\
+        \\```{.zig #a}
+        \\```
+    ,
+        \\**a**
+        \\```zig
+        \\```
+    );
+    try testWeave(.github,
+        \\---
+        \\```{.zig #a}
+        \\```
+        \\...
+    ,
+        \\---
+        \\**a**
+        \\```zig
+        \\```
+        \\...
     );
 }
 

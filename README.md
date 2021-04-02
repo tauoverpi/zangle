@@ -1,14 +1,3 @@
----
-title: Zangle
-documentclass: article
-toc: true
-geometry:
-  - margin=0.6in
-pagestyle: headings
-links-as-notes: true
-papersize: a4
-...
-
 # Abstract
 
 Zangle is a tool and a library for extracting executable segments of code from

@@ -33,6 +33,7 @@ pub const Token = struct {
         newline,
         text,
         fence,
+        dot_fence,
         line_fence,
         l_brace,
         r_brace,
@@ -51,6 +52,7 @@ index: usize = 0,
 
 const State = enum {
     start,
+    dot,
     fence,
     identifier,
     string,
@@ -81,12 +83,6 @@ pub fn next(self: *Tokenizer) Token {
             .start => switch (c) {
                 // simple tokens return their result directly
 
-                '.' => {
-                    token.tag = .dot;
-                    self.index += 1;
-                    break;
-                },
-
                 '#' => {
                     token.tag = .hash;
                     self.index += 1;
@@ -106,6 +102,11 @@ pub fn next(self: *Tokenizer) Token {
                 },
 
                 // longer tokens require scanning further to fully resolve them
+
+                '.' => {
+                    token.tag = .dot;
+                    state = .dot;
+                },
 
                 ' ' => {
                     token.tag = .space;
@@ -156,6 +157,14 @@ pub fn next(self: *Tokenizer) Token {
             },
 
             // states below match multi-character tokens
+
+            .dot => if (c != '.') {
+                break;
+            } else {
+                fence = '.';
+                state = .fence;
+                token.tag = .dot_fence;
+            },
 
             .fence => if (c != fence) break,
 
