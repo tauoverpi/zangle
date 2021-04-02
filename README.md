@@ -30,13 +30,13 @@ named `.zangle` residing within the current directory. The options are as follow
 
 | Option | Description | State |
 | --     | --          | --    |
-| `watch` | Stay open and watch given files for changes. | incomplete |
-| `config` | Give the location of a configuration file to read. | incomplete |
-| `doctest` | Run code within test blocks. If this option is used along with `weave` then the expected result will also be printed. | incomplete |
-| `weave` | Generate a pretty version of the document for compilation to PDF with pandoc. | incomplete |
-| `delimiter` | Override the default placeholder delimites for all blocks. (see @tbl:configuration-delimiters}) | incomplete |
-| `entangle` | Enable entangled mode where changes in generated source files are written back to the document | incomplete |
-| `file` | Specify a file to tangle | incomplete |
+| `watch: bool = false,` | Stay open and watch given files for changes. | incomplete |
+| `config: ?[]const u8 = null,` | Give the location of a configuration file to read. | incomplete |
+| `doctest: bool = false,` | Run code within test blocks. If this option is used along with `weave` then the expected result will also be printed. | incomplete |
+| `weave: ?[]const u8 = null,` | Generate a pretty version of the document for compilation to PDF with pandoc. | incomplete |
+| `delimiter: Delimiter = .chevron,` | Override the default placeholder delimites for all blocks. (see @tbl:configuration-delimiters}) | incomplete |
+| `entangle: bool = false,` | Enable entangled mode where changes in generated source files are written back to the document | incomplete |
+| `file: []const []const u8,` | Specify a file to tangle | incomplete |
 
 : Configuration parameters {#tbl:configuration-parameters}
 

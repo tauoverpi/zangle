@@ -294,7 +294,7 @@ pub fn weaveGithub(tree: Tree, writer: anytype) !void {
         .inline_block => {
             const found = tree.getToken(tokens[i]);
             assert(tags[i] == .end);
-            try writer.writeAll(found.slice(tree.text));
+            try writer.writeAll(tree.text[last..found.data.end]);
             if (source[tokens[i] + 1] == .l_brace) {
                 if (mem.indexOfScalarPos(Tokenizer.Token.Tag, source, tokens[i] + 1, .r_brace)) |index| {
                     last = tree.getToken(index).data.end;
