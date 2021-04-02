@@ -4,6 +4,7 @@ pub const Tokenizer = @import("zangle/Tokenizer.zig");
 pub const build = struct {
     pub const TangleFilesStep = @import("build/TangleFilesStep.zig");
     pub const DocTestStep = @import("build/DocTestStep.zig");
+    pub const WeaveStep = @import("build/WeaveStep.zig");
 };
 
 test {

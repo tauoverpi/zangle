@@ -27,6 +27,12 @@ pub fn build(b: *std.build.Builder) !void {
     const tangle_step = b.step("tangle", "Extract executable code from documentation");
     tangle_step.dependOn(&tangler.step);
 
+    const weaver = try lib.build.WeaveStep.init(b, .github, "README.md");
+    try weaver.addFile("docs/zangle.md");
+
+    const weave_step = b.step("weave", "Pretty print documentation");
+    weave_step.dependOn(&weaver.step);
+
     const doctest = try lib.build.DocTestStep.init(b);
     try doctest.addFile("docs/zangle.md");
 
@@ -45,11 +51,7 @@ pub fn build(b: *std.build.Builder) !void {
     exe.install();
 
     const pdf_step = b.step("pdf", "Render documentation to PDF");
-    pdf_step.dependOn(&(try pandoc(b, &.{
-        "README.md",
-        "-o",
-        "out/manual.pdf",
-    })).step);
+    pdf_step.dependOn(&(try pandoc(b, &.{ "docs/zangle.md", "-o", "out/manual.pdf" })).step);
 
     const run_cmd = exe.run();
     run_cmd.step.dependOn(b.getInstallStep());
@@ -67,7 +69,7 @@ pub fn build(b: *std.build.Builder) !void {
     test_step.dependOn(tangle_step);
     test_step.dependOn(&main_test.step);
 
-    const lib_test_step = b.step("lib-test", "Run library unit tests");
+    const lib_test_step = b.step("test-lib", "Run library unit tests");
     lib_test_step.dependOn(doctest_step);
     lib_test_step.dependOn(&b.addTest("lib/lib.zig").step);
 }

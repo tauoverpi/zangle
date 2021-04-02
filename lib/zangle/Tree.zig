@@ -241,7 +241,7 @@ pub const Weaver = enum {
 pub fn weave(tree: Tree, weaver: Weaver, writer: anytype) !void {
     switch (weaver) {
         .github => try tree.weaveGithub(writer),
-        .pandoc => try tree.weavePandoc(writer),
+        .pandoc => return error.NotImplemented, //try tree.weavePandoc(writer),
         .elara => return error.NotImplemented,
     }
 }
@@ -252,60 +252,61 @@ pub fn weaveGithub(tree: Tree, writer: anytype) !void {
     const tokens = tree.nodes.items(.token);
     const source = tree.tokens.items(.tag);
     var state: enum { scan, inline_block } = .scan;
-    var fence: usize = 0;
-    for (tags) |tag, i| {
-        switch (state) {
-            .scan => {
-                switch (tag) {
-                    .inline_block => {
-                        state = .inline_block;
-                    },
-                    .tag => {
-                        try writer.print("**<<{s}>>**", .{tree.getTokenSlice(tokens[i])});
-                        continue;
-                    },
-                    .block, .file => {
-                        const r_brace = tree.getToken(tokens[i] - 2);
-                        if (r_brace.tag == .r_brace) {
-                            if (mem.lastIndexOfScalar(Tokenizer.Token.Tag, source[0..tokens[i]], .l_brace)) |l_brace| {
-                                try writer.print(
-                                    \\
-                                    \\{s}{s}
-                                , .{
-                                    tree.getTokenSlice(@intCast(u16, l_brace) - 1),
-                                    tree.getTokenSlice(@intCast(u16, l_brace) + 2),
-                                });
-                                last = r_brace.data.end;
-                                continue;
-                            }
-                        }
-                    },
-                    else => continue,
-                }
-                const found = tree.getToken(tokens[i]);
-                fence = found.len();
-                const slice = tree.text[last..found.data.end];
-                try writer.writeAll(slice);
-                last = slice.len;
-            },
+    for (tags) |tag, i| switch (state) {
+        .scan => {
+            switch (tag) {
+                .inline_block => state = .inline_block,
+                //   ;
+                .block, .file => {
+                    const r_brace = tree.getToken(tokens[i] - 2);
+                    if (r_brace.tag == .r_brace) {
+                        if (mem.lastIndexOfScalar(Tokenizer.Token.Tag, source[0..tokens[i]], .l_brace)) |l_brace| {
+                            const fence = tree.getToken(l_brace - 1);
+                            const here = tree.getToken(l_brace).data.start;
+                            const slice = tree.text[last .. here - fence.len()];
+                            var j: usize = 1;
 
-            .inline_block => {
-                const found = tree.getToken(tokens[i]);
-                assert(tags[i] == .end);
-                try writer.writeAll(found.slice(tree.text));
-                if (source[tokens[i] + 1] == .l_brace) {
-                    if (mem.indexOfScalarPos(Tokenizer.Token.Tag, source, tokens[i] + 1, .r_brace)) |index| {
-                        last = tree.getToken(index).data.end;
-                    } else {
-                        last = found.data.end;
+                            try writer.writeAll(slice);
+
+                            while (j <= i) : (j += 1) switch (tags[i - j]) {
+                                .filename => {},
+                                .tag => try writer.print("**<<{s}>>**\n", .{tree.getTokenSlice(tokens[i - j])}),
+                                else => break,
+                            };
+
+                            try writer.print("{s}{s}", .{
+                                fence.slice(tree.text),
+                                tree.getTokenSlice(@intCast(Node.Index, l_brace + 2)),
+                            });
+                            last = r_brace.data.end;
+                            continue;
+                        }
                     }
+                },
+                else => continue,
+            }
+            const found = tree.getToken(tokens[i]);
+            const slice = tree.text[last..found.data.end];
+            try writer.writeAll(slice);
+            last += slice.len;
+        },
+
+        .inline_block => {
+            const found = tree.getToken(tokens[i]);
+            assert(tags[i] == .end);
+            try writer.writeAll(found.slice(tree.text));
+            if (source[tokens[i] + 1] == .l_brace) {
+                if (mem.indexOfScalarPos(Tokenizer.Token.Tag, source, tokens[i] + 1, .r_brace)) |index| {
+                    last = tree.getToken(index).data.end;
                 } else {
                     last = found.data.end;
                 }
-                state = .scan;
-            },
-        }
-    }
+            } else {
+                last = found.data.end;
+            }
+            state = .scan;
+        },
+    };
 
     try writer.writeAll(tree.text[last..]);
 }
@@ -330,12 +331,7 @@ pub fn weavePandoc(tree: Tree, writer: anytype) !void {
     const source = tree.tokens.items(.tag);
     var fence: usize = 0;
     for (tags) |tag, i| {
-        switch (tag) {
-            .tag => {
-                try writer.print("**<<{s}>>**\n", .{tree.getTokenSlice(tokens[i])});
-            },
-            else => continue,
-        }
+        //switch (tag) {}
         const found = tree.getToken(tokens[i]);
         fence = found.len();
         const slice = tree.text[last..found.data.end];
@@ -347,6 +343,7 @@ pub fn weavePandoc(tree: Tree, writer: anytype) !void {
 }
 
 test "weave pandoc" {
+    if (true) return error.SkipZigTest;
     try testWeave(.pandoc, "Example `text`{.zig} in a block", "Example `text`{.zig} in a block");
     try testWeave(.pandoc,
         \\```{.zig #a}
