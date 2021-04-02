@@ -270,7 +270,7 @@ pub fn weaveGithub(tree: Tree, writer: anytype) !void {
 
                             while (j <= i) : (j += 1) switch (tags[i - j]) {
                                 .filename => {},
-                                .tag => try writer.print("**<<{s}>>**\n", .{tree.getTokenSlice(tokens[i - j])}),
+                                .tag => try writer.print("**{s}**\n", .{tree.getTokenSlice(tokens[i - j])}),
                                 else => break,
                             };
 

@@ -51,7 +51,7 @@ named `.zangle` residing within the current directory. The options are as follow
 
 ## Command-line arguments
 
-**<<command-line-argument-union>>**
+**command-line-argument-union**
 ```zig
 pub const Arg = union(enum) {
     short: u8,
@@ -61,7 +61,7 @@ pub const Arg = union(enum) {
 };
 ```
 
-**<<command-line-iterator>>**
+**command-line-iterator**
 ```zig
 const State = enum {
     start,
@@ -69,7 +69,7 @@ const State = enum {
 };
 ```
 
-**<<command-line-iterator>>**
+**command-line-iterator**
 ```zig
 const short_options = ComptimeStringMap(State, .{
     .{ "f", .filename },
@@ -77,7 +77,7 @@ const short_options = ComptimeStringMap(State, .{
 });
 ```
 
-**<<command-line-iterator>>**
+**command-line-iterator**
 ```zig
 const long_options = ComptimeStringMap(State, .{
     .{ "file", .filename },
@@ -85,7 +85,7 @@ const long_options = ComptimeStringMap(State, .{
 });
 ```
 
-**<<command-line-iterator>>**
+**command-line-iterator**
 ```zig
 pub fn CliIterator(comptime short: anytype, comptime long: anytype) type {
     return struct {
@@ -109,7 +109,7 @@ pub fn CliIterator(comptime short: anytype, comptime long: anytype) type {
 }
 ```
 
-**<<command-line-iterator-next>>**
+**command-line-iterator-next**
 ```zig
 it.token = Tokenizer{ .text = it.args[it.index] };
 it.index += 1;
@@ -158,7 +158,7 @@ while (true) {
 }
 ```
 
-**<<command-line-iterator>>**
+**command-line-iterator**
 ```zig
 test {
     var it = CliIterator(short_options, long_options){ .args = &.{
@@ -179,7 +179,7 @@ test {
 
 ## Configuration file parsing
 
-**<<configuration-iterator>>**
+**configuration-iterator**
 ```zig
 const ConfigIterator = struct {
     token: Tokenizer,
@@ -194,7 +194,7 @@ const ConfigIterator = struct {
 };
 ```
 
-**<<configuration-iterator-next>>**
+**configuration-iterator-next**
 ```zig
 const key: Token = found: {
     while (true) {
@@ -222,7 +222,7 @@ const key: Token = found: {
 
 ```
 
-**<<configuration-iterator-next>>**
+**configuration-iterator-next**
 ```zig
 try it.expect(.space);
 try it.expect(.equal);
@@ -230,7 +230,7 @@ try it.expect(.space);
 
 ```
 
-**<<configuration-iterator-next>>**
+**configuration-iterator-next**
 ```zig
 var value = try it.oneOf(&.{ .identifier, .string });
 if (value.tag == .string) {
@@ -250,7 +250,7 @@ switch (eol.tag) {
 
 ```
 
-**<<configuration-iterator-next>>**
+**configuration-iterator-next**
 ```zig
 return Pair{
     .key = it.token.text[key.data.start..key.data.end],
@@ -259,7 +259,7 @@ return Pair{
 ```
 
 
-**<<iterator-one-of>>**
+**iterator-one-of**
 ```zig
 fn oneOf(it: *@This(), expected: []const Token.Tag) !Token {
     const found = it.token.next();
@@ -274,7 +274,7 @@ fn oneOf(it: *@This(), expected: []const Token.Tag) !Token {
 }
 ```
 
-**<<iterator-expect>>**
+**iterator-expect**
 ```zig
 fn expect(it: *@This(), expected: Token.Tag) !void {
     _ = try it.oneOf(&.{expected});
@@ -282,7 +282,7 @@ fn expect(it: *@This(), expected: Token.Tag) !void {
 ```
 
 
-**<<configuration-booleans>>**
+**configuration-booleans**
 ```zig
 const boolean = ComptimeStringMap(bool, .{
     .{ "yes", true },
