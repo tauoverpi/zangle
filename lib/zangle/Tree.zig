@@ -251,7 +251,7 @@ pub fn weaveGithub(tree: Tree, writer: anytype) !void {
     const tags = tree.nodes.items(.tag);
     const tokens = tree.nodes.items(.token);
     const source = tree.tokens.items(.tag);
-    var state: enum { scan, inline_block, block, end } = .scan;
+    var state: enum { scan, inline_block } = .scan;
     var fence: usize = 0;
     for (tags) |tag, i| {
         switch (state) {
@@ -304,8 +304,6 @@ pub fn weaveGithub(tree: Tree, writer: anytype) !void {
                 }
                 state = .scan;
             },
-            .block => {},
-            .end => {},
         }
     }
 
@@ -326,7 +324,38 @@ test "weave github" {
 }
 
 pub fn weavePandoc(tree: Tree, writer: anytype) !void {
-    // TODO
+    var last: usize = 0;
+    const tags = tree.nodes.items(.tag);
+    const tokens = tree.nodes.items(.token);
+    const source = tree.tokens.items(.tag);
+    var fence: usize = 0;
+    for (tags) |tag, i| {
+        switch (tag) {
+            .tag => {
+                try writer.print("**<<{s}>>**\n", .{tree.getTokenSlice(tokens[i])});
+            },
+            else => continue,
+        }
+        const found = tree.getToken(tokens[i]);
+        fence = found.len();
+        const slice = tree.text[last..found.data.end];
+        try writer.writeAll(slice);
+        last = slice.len;
+    }
+
+    try writer.writeAll(tree.text[last..]);
+}
+
+test "weave pandoc" {
+    try testWeave(.pandoc, "Example `text`{.zig} in a block", "Example `text`{.zig} in a block");
+    try testWeave(.pandoc,
+        \\```{.zig #a}
+        \\```
+    ,
+        \\**<<a>>**
+        \\```{.zig #a}
+        \\```
+    );
 }
 
 fn testWeave(weaver: Weaver, input: []const u8, expected: []const u8) !void {
