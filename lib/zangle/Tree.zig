@@ -235,14 +235,13 @@ test "filename" {
 pub const Weaver = enum {
     github,
     pandoc,
-    elara,
+    //elara,
 };
 
 pub fn weave(tree: Tree, weaver: Weaver, writer: anytype) !void {
     switch (weaver) {
         .github => try tree.weaveGithub(writer),
-        .pandoc => return error.NotImplemented, //try tree.weavePandoc(writer),
-        .elara => return error.NotImplemented,
+        .pandoc => try tree.weavePandoc(writer),
     }
 }
 
@@ -386,28 +385,46 @@ pub fn weavePandoc(tree: Tree, writer: anytype) !void {
     const tags = tree.nodes.items(.tag);
     const tokens = tree.nodes.items(.token);
     const source = tree.tokens.items(.tag);
-    var fence: usize = 0;
-    for (tags) |tag, i| {
-        //switch (tag) {}
-        const found = tree.getToken(tokens[i]);
-        fence = found.len();
-        const slice = tree.text[last..found.data.end];
-        try writer.writeAll(slice);
-        last = slice.len;
-    }
+
+    for (tags) |tag, i| switch (tag) {
+        .block, .file => {
+            const r_brace = tree.getToken(tokens[i] - 2);
+            if (r_brace.tag == .r_brace) {
+                if (mem.lastIndexOfScalar(Tokenizer.Token.Tag, source[0..tokens[i]], .l_brace)) |l_brace| {
+                    const fence = tree.getToken(l_brace - 1);
+                    const here = tree.getToken(l_brace).data.start;
+                    const slice = tree.text[last .. here - fence.len()];
+                    var j: usize = 1;
+
+                    try writer.writeAll(slice);
+
+                    while (j <= i) : (j += 1) switch (tags[i - j]) {
+                        .filename => {},
+                        .tag => try writer.print("**{s}**\n", .{tree.getTokenSlice(tokens[i - j])}),
+                        else => break,
+                    };
+
+                    try writer.writeAll(tree.text[last + slice.len .. r_brace.data.end]);
+                    last = r_brace.data.end;
+                    continue;
+                }
+            }
+        },
+        else => continue,
+    };
 
     try writer.writeAll(tree.text[last..]);
 }
 
 test "weave pandoc" {
-    if (true) return error.SkipZigTest;
     try testWeave(.pandoc, "Example `text`{.zig} in a block", "Example `text`{.zig} in a block");
     try testWeave(.pandoc,
-        \\```{.zig #a}
+        \\```{.zig #a #b}
         \\```
     ,
-        \\**<<a>>**
-        \\```{.zig #a}
+        \\**b**
+        \\**a**
+        \\```{.zig #a #b}
         \\```
     );
 }

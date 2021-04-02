@@ -50,8 +50,14 @@ pub fn build(b: *std.build.Builder) !void {
     exe.addLibPath("lib/lib.zig");
     exe.install();
 
+    const weave_pretty = try lib.build.WeaveStep.init(b, .pandoc, "out/zangle-pretty.md");
+    try weave_pretty.addFile("docs/zangle.md");
+
+    const pandoc_step = try pandoc(b, &.{ "out/zangle-pretty.md", "-o", "out/manual.pdf" });
+    pandoc_step.step.dependOn(&weave_pretty.step);
+
     const pdf_step = b.step("pdf", "Render documentation to PDF");
-    pdf_step.dependOn(&(try pandoc(b, &.{ "docs/zangle.md", "-o", "out/manual.pdf" })).step);
+    pdf_step.dependOn(&pandoc_step.step);
 
     const run_cmd = exe.run();
     run_cmd.step.dependOn(b.getInstallStep());
