@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Setup Directories
+        run: |
+          mkdir zig out
+          echo "$(pwd)/zig" >> $GITHUB_PATH
+
+      - name: Download Zig
+        working-directory: zig
+        run: |
+          wget -qO releases.json https://ziglang.org/download/index.json
+          wget -qO zig.tar.xf "$(cat releases.json | jq -r '.master."x86_64-linux".tarball')"
+          tar --strip-components=1 -xJf zig.tar.xf
+
+      - name: Build zangle
+        run: zig build
+
+      - name: Weave
+        run: zig build weave
+
+      - name: Run library tests
+        run: zig build test-lib
+
+      - name: Run application tests
+        run: zig build test
