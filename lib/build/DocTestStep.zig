@@ -86,7 +86,7 @@ fn make(step: *Step) !void {
             var file = try fs.cwd().createFile(filename, .{ .truncate = true });
             defer file.close();
 
-            try tree.render(&stack, .{ .index = root.index }, file.writer());
+            try tree.tangle(&stack, .{ .index = root.index }, file.writer());
         }
 
         const result = try std.ChildProcess.exec(.{

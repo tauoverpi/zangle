@@ -96,7 +96,7 @@ pub fn deinit(p: *Parser) void {
     p.* = undefined;
 }
 
-fn getToken(p: Parser, index: usize) !Tokenizer.Token {
+fn getToken(p: Parser, index: usize) Tokenizer.Token {
     const starts = p.tokens.items(.start);
     var tokenizer: Tokenizer = .{ .text = p.text, .index = starts[index].index };
     return tokenizer.next();
@@ -119,8 +119,8 @@ fn get(p: *Parser, tag: Tokenizer.Token.Tag) ![]const u8 {
 }
 
 fn getTokenSlice(p: Parser, index: usize) []const u8 {
-    const token = try p.getToken(index);
-    return p.text[token.data.start..token.data.end];
+    const token = p.getToken(index);
+    return token.slice(p.text);
 }
 
 fn consume(p: *Parser) !Tokenizer.Token.Tag {
@@ -149,6 +149,8 @@ pub fn resolve(p: *Parser) !void {
 fn addTagNames(p: *Parser, block: Node.Index) !void {
     const tags = p.nodes.items(.tag);
     const tokens = p.nodes.items(.token);
+
+    if (block == 0) return;
 
     {
         var i = block - 1;
@@ -191,10 +193,10 @@ fn parseFencedBlock(p: *Parser) !Node.Index {
     // find the closing fence
     while (mem.indexOfPos(Tokenizer.Token.Tag, tokens, p.index, &.{ .newline, .fence })) |found| {
         if (mem.eql(u8, fence, p.getTokenSlice(found + 1))) {
-            p.index = found + 1;
+            p.index = found;
             break;
         } else {
-            p.index = found + 1;
+            p.index = found + 2;
         }
     } else return error.FenceNotClosed;
 
@@ -282,12 +284,16 @@ const Meta = struct {
 /// allocate nodes for each tag found.
 fn parseMetaBlock(p: *Parser) !Meta {
     p.expect(.l_brace) catch unreachable;
-    var file: ?Node.Index = null;
-    var doctest = false;
+    var meta_block = Meta{ .filename = null, .doctest = false };
 
     try p.expect(.dot);
     const language = try p.get(.identifier);
-    try p.expect(.space);
+
+    switch (try p.consume()) {
+        .space => {},
+        .r_brace => return meta_block,
+        else => return error.UnexpectedToken,
+    }
 
     const before = p.nodes.len;
     errdefer p.nodes.shrinkRetainingCapacity(before);
@@ -297,7 +303,11 @@ fn parseMetaBlock(p: *Parser) !Meta {
             .dot => {
                 const key = try p.get(.identifier);
                 if (mem.eql(u8, "doctest", key)) {
-                    doctest = true;
+                    meta_block.doctest = true;
+                } else if (mem.eql(u8, "docrun", key)) {
+                    // TODO
+                } else if (mem.eql(u8, "actor", key)) {
+                    // TODO
                 } else {
                     // Ignore it, it's probably for pandoc or another filter
                 }
@@ -308,9 +318,9 @@ fn parseMetaBlock(p: *Parser) !Meta {
                 try p.expect(.equal);
                 const string = try p.get(.string);
                 if (mem.eql(u8, "file", key)) {
-                    if (file != null) return error.MultipleTargets;
+                    if (meta_block.filename != null) return error.MultipleTargets;
                     if (string.len <= 2) return error.InvalidFileName;
-                    file = @intCast(Node.Index, p.index - 1);
+                    meta_block.filename = @intCast(Node.Index, p.index - 1);
                 } else if (mem.eql(u8, "delimiter", key)) {
                     p.delimiter = meta.stringToEnum(Delimiter, string) orelse
                         return error.InvalidDelimiter;
@@ -332,7 +342,7 @@ fn parseMetaBlock(p: *Parser) !Meta {
         }
     }
 
-    return Meta{ .filename = file, .doctest = doctest };
+    return meta_block;
 }
 
 fn parsePlaceholders(p: *Parser, start: usize, end: usize, block: bool) !void {
@@ -351,12 +361,13 @@ fn parsePlaceholders(p: *Parser, start: usize, end: usize, block: bool) !void {
             .brace => if (!mem.eql(u8, "}}", chev)) continue,
         }
 
-        const newline = if (block)
-            (mem.lastIndexOfScalar(Tokenizer.Token.Tag, tokens[0..found], .newline) orelse 0)
-        else
-            found;
+        var indent: usize = 0;
 
-        const indent = p.text[starts[newline + 1].index..starts[found].index].len;
+        if (mem.lastIndexOfScalar(Tokenizer.Token.Tag, tokens[0 .. p.index - 1], .newline)) |nl| {
+            const here = p.getToken(p.index - 3);
+            const newline = p.getToken(nl);
+            indent = here.data.start - newline.data.end;
+        }
 
         try p.nodes.append(p.gpa, .{
             .tag = .placeholder,
@@ -394,7 +405,7 @@ fn findStartOfBlock(p: *Parser) ?Block {
             var tokenizer: Tokenizer = .{ .text = p.text, .index = starts[block].index };
             const token = tokenizer.next();
             assert(token.tag == .fence);
-            if (token.data.end - token.data.start >= 3) {
+            if (token.len() >= 3) {
                 p.index = block;
                 return .fenced_block;
             } else {
@@ -425,7 +436,6 @@ fn testParse(input: []const u8) !void {
 }
 
 test "parse simple" {
-    // TODO: more tests
     var p = try Parser.init(std.testing.allocator,
         \\This is an example file with some text that will
         \\cause the tokenizer to fill the token slice with
@@ -460,10 +470,10 @@ test "parse simple" {
     const tags = p.tokens.items(.tag);
     const node_tokens = p.nodes.items(.token);
 
-    testing.expectEqual(root.index, p.name_map.get("and-can-have-tags").?);
+    testing.expectEqual(root.index, p.name_map.get("and-can-have-tags").?.head);
     testing.expectEqual(Tokenizer.Token.Tag.l_chevron, tags[node_tokens[root.index + 1] - 1]);
     testing.expectEqual(Tokenizer.Token.Tag.l_chevron, tags[node_tokens[root.index + 2] - 1]);
-    testing.expectEqual(root.index + 5, p.name_map.get("that").?);
+    testing.expectEqual(root.index + 5, p.name_map.get("that").?.head);
 }
 
 test "fences" {

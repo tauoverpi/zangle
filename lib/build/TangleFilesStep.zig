@@ -65,6 +65,6 @@ fn make(step: *Step) !void {
         if (fs.path.dirname(filename)) |dir| try self.builder.makePath(dir);
         var file = try fs.cwd().createFile(filename, .{ .truncate = true });
         defer file.close();
-        try tree.render(&stack, root, file.writer());
+        try tree.tangle(&stack, root, file.writer());
     }
 }

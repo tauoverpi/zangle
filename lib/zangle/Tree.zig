@@ -1,6 +1,7 @@
 const std = @import("std");
 const testing = std.testing;
 const assert = std.debug.assert;
+const mem = std.mem;
 const Allocator = std.mem.Allocator;
 
 const Tokenizer = @import("Tokenizer.zig");
@@ -18,7 +19,6 @@ const DocTest = Parser.DocTest;
 
 pub const Tree = @This();
 text: []const u8,
-// TODO: you can probably remove this
 tokens: TokenList.Slice,
 nodes: NodeList.Slice,
 roots: []RootIndex,
@@ -46,7 +46,7 @@ fn getToken(tree: Tree, index: usize) Token {
 
 pub fn getTokenSlice(tree: Tree, index: Node.Index) []const u8 {
     const token = tree.getToken(index);
-    return tree.text[token.data.start..token.data.end];
+    return token.slice(tree.text);
 }
 
 pub fn deinit(tree: *Tree, gpa: *Allocator) void {
@@ -86,7 +86,7 @@ pub fn filename(tree: Tree, root: RootIndex) []const u8 {
     return name[1 .. name.len - 1];
 }
 
-pub fn render(tree: Tree, stack: *std.ArrayList(RenderNode), root: RootIndex, writer: anytype) !void {
+pub fn tangle(tree: Tree, stack: *std.ArrayList(RenderNode), root: RootIndex, writer: anytype) !void {
     const tags = tree.nodes.items(.tag);
     const tokens = tree.nodes.items(.token);
     const starts = tree.tokens.items(.start);
@@ -151,7 +151,7 @@ pub fn render(tree: Tree, stack: *std.ArrayList(RenderNode), root: RootIndex, wr
     }
 }
 
-fn testRender(input: []const u8, expected: []const []const u8) !void {
+fn testTangle(input: []const u8, expected: []const []const u8) !void {
     const allocator = std.testing.allocator;
 
     var tree = try Tree.parse(allocator, input);
@@ -166,14 +166,14 @@ fn testRender(input: []const u8, expected: []const []const u8) !void {
     for (expected) |expect, i| {
         defer stream.shrinkRetainingCapacity(0);
 
-        try tree.render(&stack, tree.roots[i], stream.writer());
+        try tree.tangle(&stack, tree.roots[i], stream.writer());
 
         testing.expectEqualStrings(expect, stream.items);
     }
 }
 
 test "render python" {
-    try testRender(
+    try testTangle(
         \\Testing `42`{.python #number} definitions.
         \\
         \\```{.python file="example.zig"}
@@ -188,18 +188,20 @@ test "render python" {
         \\```{.python #block}
         \\answer = <<number>> # comment
         \\<<comment>>
+        \\<<comment>>
         \\return answer
         \\```
     , &.{
         \\def universe(question):
         \\    answer = 42 # comment
         \\    # then return the truth
+        \\    # then return the truth
         \\    return answer
     });
 }
 
 test "multiple outputs" {
-    try testRender(
+    try testTangle(
         \\Rendering multiple inputs from the same tree
         \\works the same given `Tree`{.zig #tree-type}
         \\stroing all root nodes in order of discovery.
@@ -228,4 +230,115 @@ test "filename" {
     );
     defer tree.deinit(std.testing.allocator);
     testing.expectEqualStrings("test.zig", tree.filename(tree.roots[0]));
+}
+
+pub const Weaver = enum {
+    github,
+    pandoc,
+    elara,
+};
+
+pub fn weave(tree: Tree, weaver: Weaver, writer: anytype) !void {
+    switch (weaver) {
+        .github => try tree.weaveGithub(writer),
+        .pandoc => try tree.weavePandoc(writer),
+        .elara => return error.NotImplemented,
+    }
+}
+
+pub fn weaveGithub(tree: Tree, writer: anytype) !void {
+    var last: usize = 0;
+    const tags = tree.nodes.items(.tag);
+    const tokens = tree.nodes.items(.token);
+    const source = tree.tokens.items(.tag);
+    var state: enum { scan, inline_block, block, end } = .scan;
+    var fence: usize = 0;
+    for (tags) |tag, i| {
+        switch (state) {
+            .scan => {
+                switch (tag) {
+                    .inline_block => {
+                        state = .inline_block;
+                    },
+                    .tag => {
+                        try writer.print("**<<{s}>>**", .{tree.getTokenSlice(tokens[i])});
+                        continue;
+                    },
+                    .block, .file => {
+                        const r_brace = tree.getToken(tokens[i] - 2);
+                        if (r_brace.tag == .r_brace) {
+                            if (mem.lastIndexOfScalar(Tokenizer.Token.Tag, source[0..tokens[i]], .l_brace)) |l_brace| {
+                                try writer.print(
+                                    \\
+                                    \\{s}{s}
+                                , .{
+                                    tree.getTokenSlice(@intCast(u16, l_brace) - 1),
+                                    tree.getTokenSlice(@intCast(u16, l_brace) + 2),
+                                });
+                                last = r_brace.data.end;
+                                continue;
+                            }
+                        }
+                    },
+                    else => continue,
+                }
+                const found = tree.getToken(tokens[i]);
+                fence = found.len();
+                const slice = tree.text[last..found.data.end];
+                try writer.writeAll(slice);
+                last = slice.len;
+            },
+
+            .inline_block => {
+                const found = tree.getToken(tokens[i]);
+                assert(tags[i] == .end);
+                try writer.writeAll(found.slice(tree.text));
+                if (source[tokens[i] + 1] == .l_brace) {
+                    if (mem.indexOfScalarPos(Tokenizer.Token.Tag, source, tokens[i] + 1, .r_brace)) |index| {
+                        last = tree.getToken(index).data.end;
+                    } else {
+                        last = found.data.end;
+                    }
+                } else {
+                    last = found.data.end;
+                }
+                state = .scan;
+            },
+            .block => {},
+            .end => {},
+        }
+    }
+
+    try writer.writeAll(tree.text[last..]);
+}
+
+test "weave github" {
+    try testWeave(.github, "Example `text`{.zig} in a block", "Example `text` in a block");
+    try testWeave(.github, "Example `text`{.zig}", "Example `text`");
+    try testWeave(.github,
+        \\```{.zig #a}
+        \\```
+    ,
+        \\**<<a>>**
+        \\```zig
+        \\```
+    );
+}
+
+pub fn weavePandoc(tree: Tree, writer: anytype) !void {
+    // TODO
+}
+
+fn testWeave(weaver: Weaver, input: []const u8, expected: []const u8) !void {
+    const allocator = std.testing.allocator;
+
+    var tree = try Tree.parse(allocator, input);
+    defer tree.deinit(allocator);
+
+    var stream = std.ArrayList(u8).init(allocator);
+    defer stream.deinit();
+
+    try tree.weave(weaver, stream.writer());
+
+    testing.expectEqualStrings(expected, stream.items);
 }
