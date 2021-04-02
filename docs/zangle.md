@@ -35,6 +35,8 @@ named `.zangle` residing within the current directory. The options are as follow
 | `doctest: bool = false,`{.zig #z-parameters} | Run code within test blocks. If this option is used along with `weave` then the expected result will also be printed. | incomplete |
 | `weave: ?[]const u8 = null,`{.zig #z-parameters} | Generate a pretty version of the document for compilation to PDF with pandoc. | incomplete |
 | `delimiter: Delimiter = .chevron,`{.zig #z-parameters} | Override the default placeholder delimites for all blocks. (see @tbl:configuration-delimiters}) | incomplete |
+| `entangle: bool = false,`{.zig #z-parameters} | Enable entangled mode where changes in generated source files are written back to the document | incomplete |
+| `file: []const []const u8,`{.zig #z-parameters} | Specify a file to tangle | incomplete |
 
 : Configuration parameters {#tbl:configuration-parameters}
 

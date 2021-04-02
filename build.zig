@@ -8,10 +8,6 @@ const pkgs = struct {
         .name = "lib",
         .path = "lib/lib.zig",
     };
-    const args = std.build.Pkg{
-        .name = "args",
-        .path = "extern/zig-args/args.zig",
-    };
 };
 
 pub fn build(b: *std.build.Builder) !void {
@@ -26,13 +22,13 @@ pub fn build(b: *std.build.Builder) !void {
     const mode = b.standardReleaseOptions();
 
     const tangler = try lib.build.TangleFilesStep.init(b);
-    try tangler.addFile("README.md");
+    try tangler.addFile("docs/zangle.md");
 
     const tangle_step = b.step("tangle", "Extract executable code from documentation");
     tangle_step.dependOn(&tangler.step);
 
     const doctest = try lib.build.DocTestStep.init(b);
-    try doctest.addFile("README.md");
+    try doctest.addFile("docs/zangle.md");
 
     const doctest_step = b.step("doctest", "Extract executable code from documentation and run zig test");
     doctest_step.dependOn(&doctest.step);
@@ -44,7 +40,6 @@ pub fn build(b: *std.build.Builder) !void {
     exe.setTarget(target);
     exe.setBuildMode(mode);
     exe.step.dependOn(&fmt_step.step);
-    exe.addPackage(pkgs.args);
     exe.addPackage(pkgs.zangle);
     exe.addLibPath("lib/lib.zig");
     exe.install();
