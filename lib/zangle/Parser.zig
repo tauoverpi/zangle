@@ -17,15 +17,32 @@ pub const Node = struct {
     token: Index,
     data: Index,
 
+    pub const BlockData = packed struct {
+        file: bool = false,
+        inline_block: bool = false,
+        pad: u14 = 0,
+
+        pub fn cast(data: Index) callconv(.Inline) BlockData {
+            return @bitCast(BlockData, data);
+        }
+
+        pub fn int(self: BlockData) callconv(.Inline) Index {
+            return @bitCast(Index, self);
+        }
+    };
+
+    comptime {
+        assert(@sizeOf(BlockData) == @sizeOf(Index));
+    }
+
     pub const Tag = enum(u8) {
         tag,
         filename,
-        file,
         block,
-        inline_block,
         placeholder,
         end,
     };
+
     pub const Index = u16;
 };
 
@@ -213,16 +230,16 @@ fn parseFencedBlock(p: *Parser) !Node.Index {
         try p.roots.append(p.gpa, .{ .index = @intCast(Node.Index, p.nodes.len) });
         this = @intCast(Node.Index, p.nodes.len);
         try p.nodes.append(p.gpa, .{
-            .tag = .file,
+            .tag = .block,
             .token = @intCast(Node.Index, block_start),
-            .data = undefined,
+            .data = (Node.BlockData{ .file = true }).int(),
         });
     } else {
         this = @intCast(Node.Index, p.nodes.len);
         try p.nodes.append(p.gpa, .{
             .tag = .block,
             .token = @intCast(Node.Index, block_start),
-            .data = undefined,
+            .data = (Node.BlockData{}).int(),
         });
     }
 
@@ -256,9 +273,9 @@ fn parseInlineBlock(p: *Parser, start: usize) !Node.Index {
 
     const this = @intCast(Node.Index, p.nodes.len);
     try p.nodes.append(p.gpa, .{
-        .tag = .inline_block,
+        .tag = .block,
         .token = @intCast(Node.Index, start - 1),
-        .data = undefined,
+        .data = (Node.BlockData{ .inline_block = true }).int(),
     });
 
     const end = p.index;
@@ -386,6 +403,7 @@ const Block = union(enum) {
 fn findStartOfBlock(p: *Parser) ?Block {
     const tokens = p.tokens.items(.tag);
     const starts = p.tokens.items(.start);
+    // TODO: fix infinite loop when `{.z is in a code block
 
     while (p.index < p.tokens.len) {
         // search for a multi-line/inline code block `{.z

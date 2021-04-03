@@ -2,6 +2,7 @@ const std = @import("std");
 const testing = std.testing;
 const assert = std.debug.assert;
 const mem = std.mem;
+const meta = std.meta;
 const Allocator = std.mem.Allocator;
 
 const Tokenizer = @import("Tokenizer.zig");
@@ -249,6 +250,7 @@ pub fn weaveGithub(tree: Tree, writer: anytype) !void {
     var last: usize = 0;
     const tags = tree.nodes.items(.tag);
     const tokens = tree.nodes.items(.token);
+    const data = tree.nodes.items(.data);
     const source = tree.tokens.items(.tag);
     var state: enum { scan, inline_block } = .scan;
 
@@ -276,9 +278,9 @@ pub fn weaveGithub(tree: Tree, writer: anytype) !void {
     for (tags) |tag, i| switch (state) {
         .scan => {
             switch (tag) {
-                .inline_block => state = .inline_block,
-                //   ;
-                .block, .file => {
+                .block => if (Node.BlockData.cast(data[i]).inline_block) {
+                    state = .inline_block;
+                } else {
                     const r_brace = tree.getToken(tokens[i] - 2);
                     if (r_brace.tag == .r_brace) {
                         if (mem.lastIndexOfScalar(Tokenizer.Token.Tag, source[0..tokens[i]], .l_brace)) |l_brace| {
@@ -384,10 +386,11 @@ pub fn weavePandoc(tree: Tree, writer: anytype) !void {
     var last: usize = 0;
     const tags = tree.nodes.items(.tag);
     const tokens = tree.nodes.items(.token);
+    const data = tree.nodes.items(.data);
     const source = tree.tokens.items(.tag);
 
     for (tags) |tag, i| switch (tag) {
-        .block, .file => {
+        .block => if (!Node.BlockData.cast(data[i]).inline_block) {
             const r_brace = tree.getToken(tokens[i] - 2);
             if (r_brace.tag == .r_brace) {
                 if (mem.lastIndexOfScalar(Tokenizer.Token.Tag, source[0..tokens[i]], .l_brace)) |l_brace| {
@@ -441,4 +444,67 @@ fn testWeave(weaver: Weaver, input: []const u8, expected: []const u8) !void {
     try tree.weave(weaver, stream.writer());
 
     testing.expectEqualStrings(expected, stream.items);
+}
+
+pub fn Query(comptime tag: Node.Tag) type {
+    return switch (tag) {
+        .filename => struct {
+            tree: Tree,
+            index: usize = 0,
+
+            pub fn next(it: *@This()) ?[]const u8 {
+                if (it.index >= it.tree.nodes.len) return null;
+
+                const tags = it.tree.nodes.items(.tag);
+                const tokens = it.tree.nodes.items(.token);
+
+                while (mem.indexOfPos(Node.Tag, tags, it.index, &.{.filename})) |file| {
+                    const name = it.tree.getTokenSlice(tokens[file]);
+                    it.index = file + 1;
+                    return name;
+                }
+
+                return null;
+            }
+        },
+
+        .block => struct {
+            tree: Tree,
+            index: usize = 0,
+
+            pub fn next(it: *@This()) ?[]const u8 {
+                if (it.index >= it.tree.nodes.len) return null;
+
+                const tags = it.tree.nodes.items(.tag);
+                const tokens = it.tree.nodes.items(.token);
+                const tokens = it.tree.nodes.items(.data);
+
+                while (mem.indexOfPos(Node.Tag, tags, it.index, &.{.filename})) |file| {
+                    const name = it.tree.getTokenSlice(tokens[file]);
+                    it.index = file + 1;
+                    return name;
+                }
+
+                return null;
+            }
+        },
+
+        else => @compileError("no query object defined for " ++ @tagName(tag) ++ " yet"),
+    };
+}
+
+pub fn query(tree: Tree, comptime tag: Node.Tag, args: switch (tag) {
+    .filename => void,
+    else => @compileError("no query object defined for " ++ @tagName(tag) ++ " yet"),
+}) Query(tag) {
+    return Query(tag){ .tree = tree };
+}
+
+test "query" {
+    var tree = try Tree.parse(std.testing.allocator, "");
+    defer tree.deinit(std.testing.allocator);
+
+    var it = tree.query(.filename, {});
+
+    _ = it.next();
 }
