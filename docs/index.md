@@ -103,11 +103,15 @@ with pandoc markdown in the form of a library and command-line application.
 
 
 ```{.html #main-content}
-  <pre>
-    <code class="code">
+<div class="code-block">
+  <div class="container">
+    <pre>
+      <code>
 {{example-code-block}}
-    </code>
-  </pre>
+      </code>
+    </pre>
+  </div>
+</div>
 
 ```
 
@@ -130,9 +134,26 @@ pub fn main() !void {
 ```
 
 ```{.css #main-block}
-.code {
+.code-block {
   padding: 0em;
-  width: 100%;
+  width: 100vw;
+  border: none;
+  color: {{code-normal-colour}};
+  background-color: {{code-block-colour}};
+}
+
+.code-block > .container > pre {
+  margin: 0em;
+}
+
+.code-block > .container > pre > code {
+  margin: 0em;
+  padding: 0em;
+  border-radius: 0;
+  border: none;
+  color: {{code-normal-colour}};
+  background-color: {{code-block-colour}};
+
 }
 ```
 
@@ -211,12 +232,6 @@ Try it
   width: 100%;
   position: absolute;
   background-color: {{intro-colour}};
-}
-
-code {
-  border: none;
-  color: {{code-normal-colour}};
-  background-color: {{code-block-colour}};
 }
 
 {{main-block}}

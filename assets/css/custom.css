@@ -24,21 +24,32 @@
   background-color: #f6f5ee;
 }
 
-code {
-  border: none;
-  color: #eeeeee;
-  background-color: #1d2021;
-}
-
 .zangle { color: #5168a4; }
 .main {
   display: block;
   height: 100%;
   width: 100%;
   padding-top: 10em;
-}.code {
+}.code-block {
   padding: 0em;
-  width: 100%;
+  width: 100vw;
+  border: none;
+  color: #eeeeee;
+  background-color: #1d2021;
+}
+
+.code-block > .container > pre {
+  margin: 0em;
+}
+
+.code-block > .container > pre > code {
+  margin: 0em;
+  padding: 0em;
+  border-radius: 0;
+  border: none;
+  color: #eeeeee;
+  background-color: #1d2021;
+
 }.tryit-header {
   color: #5168a4;
   text-align: center;
