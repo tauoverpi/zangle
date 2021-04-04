@@ -58,6 +58,7 @@ content.
   height: 5em;
   fill: {{logo-colour}};
 }
+
 ```
 
 # Main
@@ -69,16 +70,16 @@ content.
       <p>{{short-description-of-zangle}}</p>
     </span>
     <span class="three columns">
-      insert image here
+      [insert image here]
     </span>
   </div>
 
   <div class="row">
     <span class="three columns">
-      insert image here
+      [insert image here]
     </span>
     <span class="nine columns">
-      <p>{{short-description-of-zangle}}</p>
+      <p>{{longer-description-of-zangle}}</p>
     </span>
   </div>
 </div>
@@ -88,7 +89,10 @@ content.
 ```{.txt #short-description-of-zangle}
 <span class="zangle">Zangle</span> is a literate programming tool compatible
 with pandoc markdown in the form of a library with a command-line frontend.
+```
 
+```{.txt #longer-description-of-zangle}
+[more text here]
 ```
 
 ```{.css #main-block}
@@ -101,7 +105,7 @@ with pandoc markdown in the form of a library with a command-line frontend.
 }
 ```
 
-## Example code block
+### Example code block
 
 
 ```{.html #main-content}
@@ -138,8 +142,8 @@ pub fn main() !void {
 
 ```{.css #main-block}
 .code-block {
-  margin-bottom: 2em;
-  margin-top: 2em;
+  margin-bottom: 8em;
+  margin-top: 8em;
   padding: 0em;
   width: 100vw;
   border: none;
@@ -262,6 +266,27 @@ pub fn main() !void {
 }
 ```
 
+## Bi-directional editing
+
+```{.html #main-content}
+<h3 class="bi-header">Bi-directional editing (incomplete)</h3>
+<div class="container">
+  <p>{{bi-short-description}}</p>
+</div>
+```
+
+```{.html #bi-short-description}
+Bi-directional editing monitors and writes changes in source files back to
+the document.
+```
+
+```{.css #main-block}
+.bi-header {
+  color: {{bi-colour}};
+  text-align: center;
+}
+```
+
 ## Usable from C and the web
 
 ```{.html #main-content}
@@ -344,6 +369,15 @@ Try it
 </ul>
 ```
 
+```{.css #main-block}
+.footer {
+  padding-top: 2em;
+  height: 20em;
+  width: 100vw;
+  background-color: {{footer-colour}};
+}
+```
+
 # Style
 
 ```{.css file="assets/css/custom.css"}
@@ -367,12 +401,7 @@ body {
   background-color: {{main-colour}};
 }
 
-.footer {
-  padding-top: 3em;
-  height: 20em;
-  width: 100%;
-  background-color: {{footer-colour}};
-}
+
 
 p { font-size: 1.5em; }
 
@@ -388,7 +417,7 @@ p { font-size: 1.5em; }
 | colour                                           |
 | --                                               |
 | `#000000`{.css #black}                           |
-| `#d85229`{.css #bright-orange #highlight}        |
+| `#d85229`{.css #bright-orange #highlight #bi-colour}        |
 | `#ecf0e7`{.css #lighter-green #main-colour}      |
 | `#ccd1c8`{.css #light-green #footer-colour}      |
 | `#f6f5ee`{.css #light-yellow #intro-colour}      |

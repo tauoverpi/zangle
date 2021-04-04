@@ -17,6 +17,7 @@
   fill: #5168a4;
 }
 
+
 .intro {
   top: 0em;
   width: 100%;
@@ -31,8 +32,8 @@
   width: 100%;
   padding-top: 10em;
 }.code-block {
-  margin-bottom: 2em;
-  margin-top: 2em;
+  margin-bottom: 8em;
+  margin-top: 8em;
   padding: 0em;
   width: 100vw;
   border: none;
@@ -55,6 +56,9 @@
 }.filters-header {
   color: #2bb37c;
   text-align: center;
+}.bi-header {
+  color: #d85229;
+  text-align: center;
 }.c-header {
   color: #664270;
   text-align: center;
@@ -67,18 +71,18 @@
   width: 100%;
   height: 30em;
   background-color: #f6f5ee;
+}.footer {
+  padding-top: 2em;
+  height: 20em;
+  width: 100vw;
+  background-color: #ccd1c8;
 }
 
 body {
   background-color: #ecf0e7;
 }
 
-.footer {
-  padding-top: 3em;
-  height: 20em;
-  width: 100%;
-  background-color: #ccd1c8;
-}
+
 
 p { font-size: 1.5em; }
 
