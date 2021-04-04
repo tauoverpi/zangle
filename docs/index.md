@@ -215,6 +215,7 @@ Try it
 
 code {
   border: none;
+  color: {{code-normal-colour}};
   background-color: {{code-block-colour}};
 }
 
@@ -242,23 +243,25 @@ p { font-size: 1.5em; }
 
 # Colours
 
-| colour                                                         |
-| --                                                             |
-| `#000000`{.css #black}                                         |
-| `#d85229`{.css #bright-orange #highlight}                      |
-| `#ecf0e7`{.css #lighter-green #main-colour}                    |
-| `#ccd1c8`{.css #light-green #footer-colour}                    |
-| `#f6f5ee`{.css #light-yellow #intro-colour #code-block-colour} |
-| `#ffffff`{.css #white}                                         |
-| `#555555`{.css #grey #link-colour}                             |
-| `#898f93`{.css #light-grey}                                    |
-| `#999999`{.css #lighter-grey}                                  |
-| `#cfd2cb`{.css #lightest-grey}                                 |
-| `#00a6d4`{.css #cyan}                                          |
-| `#007bb6`{.css #blue}                                          |
-| `#2bb37c`{.css #green}                                         |
-| `#5168a4`{.css #purple #logo-colour}                           |
-| `#664270`{.css #magenta}                                       |
+| colour                                           |
+| --                                               |
+| `#000000`{.css #black}                           |
+| `#d85229`{.css #bright-orange #highlight}        |
+| `#ecf0e7`{.css #lighter-green #main-colour}      |
+| `#ccd1c8`{.css #light-green #footer-colour}      |
+| `#f6f5ee`{.css #light-yellow #intro-colour}      |
+| `#ffffff`{.css #white}                           |
+| `#555555`{.css #grey #link-colour}               |
+| `#898f93`{.css #light-grey}                      |
+| `#999999`{.css #lighter-grey}                    |
+| `#cfd2cb`{.css #lightest-grey}                   |
+| `#00a6d4`{.css #cyan}                            |
+| `#007bb6`{.css #blue}                            |
+| `#2bb37c`{.css #green}                           |
+| `#5168a4`{.css #purple #logo-colour}             |
+| `#664270`{.css #magenta}                         |
+| `#1d2021`{.css #blue-grey #code-block-colour}    |
+| `#eeeeee`{.css #paper-white #code-normal-colour} |
 
 : Colours used on the site
 
