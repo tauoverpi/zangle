@@ -55,7 +55,6 @@ const State = enum {
     dot,
     fence,
     identifier,
-    string,
     space,
     ignore,
     chevron,
@@ -126,16 +125,17 @@ pub fn next(self: *Tokenizer) Token {
 
                 '"' => {
                     token.tag = .string;
-                    state = .string;
+                    self.index += 1;
+                    break;
                 },
 
-                '<', '{' => |ch| {
+                '<', '{', '(', '[' => |ch| {
                     token.tag = .l_chevron;
                     state = .chevron;
                     fence = ch;
                 },
 
-                '>', '}' => |ch| {
+                '>', '}', ')', ']' => |ch| {
                     token.tag = .r_chevron;
                     state = .chevron;
                     fence = ch;
@@ -152,7 +152,24 @@ pub fn next(self: *Tokenizer) Token {
 
             .ignore => switch (c) {
                 // All valid start characters that this must break on
-                '.', '#', '=', '\n', ' ', '`', '~', ':', 'a'...'z', 'A'...'Z', '_', '"', '<', '{', '>', '}' => break,
+                '(',
+                '.',
+                '#',
+                '=',
+                '\n',
+                ' ',
+                '`',
+                '~',
+                ':',
+                'a'...'z',
+                'A'...'Z',
+                '_',
+                '"',
+                '<',
+                '{',
+                '>',
+                '}',
+                => break,
                 else => {},
             },
 
@@ -193,19 +210,6 @@ pub fn next(self: *Tokenizer) Token {
             .identifier => switch (c) {
                 'a'...'z', 'A'...'Z', '0'...'9', '-', '_' => {},
                 else => break,
-            },
-
-            .string => switch (c) {
-                '\n', '\r' => {
-                    token.tag = .invalid;
-                    self.index += 1;
-                    break;
-                },
-                '"' => {
-                    self.index += 1;
-                    break;
-                },
-                else => {},
             },
 
             .space => switch (c) {

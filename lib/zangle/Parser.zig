@@ -63,21 +63,40 @@ pub const RootList = ArrayListUnmanaged(RootIndex);
 pub const NameMap = std.StringHashMapUnmanaged(Name);
 pub const Name = struct { head: Node.Index, trail: Trail };
 pub const Trail = ArrayListUnmanaged(Node.Index);
+
 pub const Delimiter = enum {
+    //! Delimiter - the delimiter used for the current block being parsed.
+
     /// Treat delimiters the same as regular text
-    ignore,
+    none,
     chevron,
     brace,
+    paren,
+    bracket,
 };
 
+/// Slice of the original markdown document.
 text: []const u8,
+
 gpa: *Allocator,
+
+/// Parser index into the token list. After parsing, this value is no longer
+/// used.
 index: usize,
+
 tokens: TokenList.Slice,
+
 nodes: NodeList,
+
 roots: RootList,
+
+/// Mapping of placeholder names to nodes within the document.
 name_map: NameMap,
+
 doctests: DocTestList,
+
+/// delimiter - This can be set to avoid clashes between the meta and object
+/// language or even to `none` to ignore delimiters completely.
 delimiter: Delimiter = .chevron,
 
 pub fn init(gpa: *Allocator, text: []const u8) !Parser {
@@ -164,6 +183,8 @@ pub fn resolve(p: *Parser) !void {
     }
 }
 
+/// Scan above the current block for placeholders and add this node to the
+/// respective placeholders' node list.
 fn addTagNames(p: *Parser, block: Node.Index) !void {
     const tags = p.nodes.items(.tag);
     const tokens = p.nodes.items(.token);
@@ -307,6 +328,21 @@ const Meta = struct {
     inline_content: bool,
 };
 
+/// Parse a string literal.
+fn parseString(p: *Parser) ![]const u8 {
+    p.expect(.string) catch unreachable;
+    const start = p.getToken(p.index).data.start;
+
+    while (true) switch (try p.consume()) {
+        .newline => return error.IllegalByteInString,
+        .eof => return error.UnexpectedEof,
+        .string => return p.text[start .. p.getToken(p.index).data.start - 1],
+        else => {
+            // allow other tokens
+        },
+    };
+}
+
 /// Parse the meta data block which follows a fence and
 /// allocate nodes for each tag found.
 fn parseMetaBlock(p: *Parser) !Meta {
@@ -349,13 +385,14 @@ fn parseMetaBlock(p: *Parser) !Meta {
             .identifier => {
                 const key = p.getTokenSlice(p.index - 1);
                 try p.expect(.equal);
-                const string = try p.get(.string);
+                const stridx = p.index;
+                const string = try p.parseString();
                 if (mem.eql(u8, "file", key)) {
                     if (meta_block.filename != null) return error.MultipleTargets;
-                    if (string.len <= 2) return error.InvalidFileName;
-                    meta_block.filename = @intCast(Node.Index, p.index - 1);
+                    if (string.len == 0) return error.InvalidFileName;
+                    meta_block.filename = @intCast(Node.Index, stridx);
                 } else if (mem.eql(u8, "delimiter", key)) {
-                    p.delimiter = meta.stringToEnum(Delimiter, string[1 .. string.len - 1]) orelse
+                    p.delimiter = meta.stringToEnum(Delimiter, string) orelse
                         return error.InvalidDelimiter;
                 }
             },
@@ -389,9 +426,11 @@ fn parsePlaceholders(p: *Parser, start: usize, end: usize, block: bool) !void {
         const chev = p.get(.r_chevron) catch continue;
 
         switch (p.delimiter) {
-            .ignore => continue,
+            .none => continue,
             .chevron => if (!mem.eql(u8, ">>", chev)) continue,
             .brace => if (!mem.eql(u8, "}}", chev)) continue,
+            .paren => if (!mem.eql(u8, "))", chev)) continue,
+            .bracket => if (!mem.eql(u8, "]]", chev)) continue,
         }
 
         var indent: usize = 0;

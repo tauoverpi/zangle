@@ -87,9 +87,27 @@ pub const RenderNode = struct {
     trail: []Node.Index,
 };
 
+fn getString(tree: Tree, node: Node.Index) []const u8 {
+    const start = tree.getToken(node);
+    assert(start.tag == .string);
+
+    var tokenizer: Tokenizer = .{
+        .text = tree.text,
+        .index = start.data.end,
+    };
+
+    while (true) switch (tokenizer.next().tag) {
+        .string => return tree.text[start.data.end .. tokenizer.index - 1],
+        else => |token| {
+            assert(token != .newline);
+            assert(token != .eof);
+        },
+    };
+}
+
 pub fn filename(tree: Tree, root: RootIndex) []const u8 {
     const tokens = tree.nodes.items(.token);
-    const name = tree.getTokenSlice(tokens[root.index - 1]);
+    const name = tree.getString(tokens[root.index - 1]);
     return name[1 .. name.len - 1];
 }
 
