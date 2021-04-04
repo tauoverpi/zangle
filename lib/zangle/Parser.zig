@@ -20,7 +20,8 @@ pub const Node = struct {
     pub const BlockData = packed struct {
         file: bool = false,
         inline_block: bool = false,
-        pad: u14 = 0,
+        inline_content: bool = false,
+        pad: u13 = 0,
 
         pub fn cast(data: Index) callconv(.Inline) BlockData {
             return @bitCast(BlockData, data);
@@ -232,14 +233,19 @@ fn parseFencedBlock(p: *Parser) !Node.Index {
         try p.nodes.append(p.gpa, .{
             .tag = .block,
             .token = @intCast(Node.Index, block_start),
-            .data = (Node.BlockData{ .file = true }).int(),
+            .data = (Node.BlockData{
+                .file = true,
+                .inline_content = info.inline_content,
+            }).int(),
         });
     } else {
         this = @intCast(Node.Index, p.nodes.len);
         try p.nodes.append(p.gpa, .{
             .tag = .block,
             .token = @intCast(Node.Index, block_start),
-            .data = (Node.BlockData{}).int(),
+            .data = (Node.BlockData{
+                .inline_content = info.inline_content,
+            }).int(),
         });
     }
 
@@ -275,7 +281,10 @@ fn parseInlineBlock(p: *Parser, start: usize) !Node.Index {
     try p.nodes.append(p.gpa, .{
         .tag = .block,
         .token = @intCast(Node.Index, start - 1),
-        .data = (Node.BlockData{ .inline_block = true }).int(),
+        .data = (Node.BlockData{
+            .inline_block = true,
+            .inline_content = true,
+        }).int(),
     });
 
     const end = p.index;
@@ -295,13 +304,18 @@ fn parseInlineBlock(p: *Parser, start: usize) !Node.Index {
 const Meta = struct {
     filename: ?Node.Index,
     doctest: bool,
+    inline_content: bool,
 };
 
 /// Parse the meta data block which follows a fence and
 /// allocate nodes for each tag found.
 fn parseMetaBlock(p: *Parser) !Meta {
     p.expect(.l_brace) catch unreachable;
-    var meta_block = Meta{ .filename = null, .doctest = false };
+    var meta_block = Meta{
+        .filename = null,
+        .doctest = false,
+        .inline_content = false,
+    };
 
     try p.expect(.dot);
     const language = try p.get(.identifier);
@@ -321,6 +335,8 @@ fn parseMetaBlock(p: *Parser) !Meta {
                 const key = try p.get(.identifier);
                 if (mem.eql(u8, "doctest", key)) {
                     meta_block.doctest = true;
+                } else if (mem.eql(u8, "inline", key)) {
+                    meta_block.inline_content = true;
                 } else if (mem.eql(u8, "docrun", key)) {
                     // TODO
                 } else if (mem.eql(u8, "actor", key)) {
@@ -339,7 +355,7 @@ fn parseMetaBlock(p: *Parser) !Meta {
                     if (string.len <= 2) return error.InvalidFileName;
                     meta_block.filename = @intCast(Node.Index, p.index - 1);
                 } else if (mem.eql(u8, "delimiter", key)) {
-                    p.delimiter = meta.stringToEnum(Delimiter, string) orelse
+                    p.delimiter = meta.stringToEnum(Delimiter, string[1 .. string.len - 1]) orelse
                         return error.InvalidDelimiter;
                 }
             },

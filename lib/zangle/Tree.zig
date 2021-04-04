@@ -19,6 +19,7 @@ const DocTestList = Parser.DocTestList;
 const DocTest = Parser.DocTest;
 
 pub const Tree = @This();
+
 text: []const u8,
 tokens: TokenList.Slice,
 nodes: NodeList.Slice,
@@ -26,8 +27,13 @@ roots: []RootIndex,
 name_map: NameMap,
 doctests: []DocTest,
 
-pub fn parse(gpa: *Allocator, text: []const u8) !Tree {
+pub const ParserOptions = struct {
+    delimiter: Parser.Delimiter = .chevron,
+};
+
+pub fn parse(gpa: *Allocator, text: []const u8, options: ParserOptions) !Tree {
     var p = try Parser.init(gpa, text);
+    p.delimiter = options.delimiter;
     try p.resolve();
     return Tree{
         .text = p.text,
@@ -113,7 +119,8 @@ pub fn tangle(tree: Tree, stack: *std.ArrayList(RenderNode), root: RootIndex, wr
 
             const start = tokens[item.last] + @intCast(Node.Index, item.offset);
             const end = tokens[item.node];
-            try tree.renderBlock(start, end, item.indent, writer);
+            // check if block is empty
+            if (start < end) try tree.renderBlock(start, end, item.indent, writer);
 
             _ = stack.pop();
 
@@ -155,7 +162,7 @@ pub fn tangle(tree: Tree, stack: *std.ArrayList(RenderNode), root: RootIndex, wr
 fn testTangle(input: []const u8, expected: []const []const u8) !void {
     const allocator = std.testing.allocator;
 
-    var tree = try Tree.parse(allocator, input);
+    var tree = try Tree.parse(allocator, input, .{});
     defer tree.deinit(std.testing.allocator);
 
     var stream = std.ArrayList(u8).init(allocator);
@@ -228,7 +235,7 @@ test "filename" {
     var tree = try Tree.parse(std.testing.allocator,
         \\```{.zig file="test.zig"}
         \\```
-    );
+    , .{});
     defer tree.deinit(std.testing.allocator);
     testing.expectEqualStrings("test.zig", tree.filename(tree.roots[0]));
 }
@@ -435,7 +442,7 @@ test "weave pandoc" {
 fn testWeave(weaver: Weaver, input: []const u8, expected: []const u8) !void {
     const allocator = std.testing.allocator;
 
-    var tree = try Tree.parse(allocator, input);
+    var tree = try Tree.parse(allocator, input, .{});
     defer tree.deinit(allocator);
 
     var stream = std.ArrayList(u8).init(allocator);
@@ -501,7 +508,7 @@ pub fn query(tree: Tree, comptime tag: Node.Tag, args: switch (tag) {
 }
 
 test "query" {
-    var tree = try Tree.parse(std.testing.allocator, "");
+    var tree = try Tree.parse(std.testing.allocator, "", .{});
     defer tree.deinit(std.testing.allocator);
 
     var it = tree.query(.filename, {});

@@ -13,6 +13,7 @@ step: Step,
 builder: *Builder,
 output_dir: []const u8,
 source: ArrayList(File),
+delimiter: lib.Parser.Delimiter = .chevron,
 
 pub const File = union(enum) {
     text: []const u8,
@@ -57,7 +58,9 @@ fn make(step: *Step) !void {
         },
     };
 
-    var tree = try Tree.parse(self.builder.allocator, source.items);
+    var tree = try Tree.parse(self.builder.allocator, source.items, .{
+        .delimiter = self.delimiter,
+    });
     defer tree.deinit(self.builder.allocator);
 
     var digest: [48]u8 = undefined;
