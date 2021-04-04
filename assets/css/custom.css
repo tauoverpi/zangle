@@ -31,6 +31,8 @@
   width: 100%;
   padding-top: 10em;
 }.code-block {
+  margin-bottom: 2em;
+  margin-top: 2em;
   padding: 0em;
   width: 100vw;
   border: none;
@@ -42,7 +44,7 @@
   margin: 0em;
 }
 
-.code-block > .container > pre > code {
+.code {
   margin: 0em;
   padding: 0em;
   border-radius: 0;
@@ -50,8 +52,14 @@
   color: #eeeeee;
   background-color: #1d2021;
 
+}.filters-header {
+  color: #2bb37c;
+  text-align: center;
+}.c-header {
+  color: #664270;
+  text-align: center;
 }.tryit-header {
-  color: #5168a4;
+  color: #007bb6;
   text-align: center;
 }
 .tryit-block {

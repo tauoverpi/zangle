@@ -87,7 +87,7 @@ content.
 
 ```{.txt #short-description-of-zangle}
 <span class="zangle">Zangle</span> is a literate programming tool compatible
-with pandoc markdown in the form of a library and command-line application.
+with pandoc markdown in the form of a library with a command-line frontend.
 
 ```
 
@@ -101,12 +101,14 @@ with pandoc markdown in the form of a library and command-line application.
 }
 ```
 
+## Example code block
+
 
 ```{.html #main-content}
 <div class="code-block">
   <div class="container">
     <pre>
-      <code>
+      <code class="code">
 {{example-code-block}}
       </code>
     </pre>
@@ -135,6 +137,8 @@ pub fn main() !void {
 
 ```{.css #main-block}
 .code-block {
+  margin-bottom: 2em;
+  margin-top: 2em;
   padding: 0em;
   width: 100vw;
   border: none;
@@ -146,7 +150,7 @@ pub fn main() !void {
   margin: 0em;
 }
 
-.code-block > .container > pre > code {
+.code {
   margin: 0em;
   padding: 0em;
   border-radius: 0;
@@ -157,8 +161,130 @@ pub fn main() !void {
 }
 ```
 
+## Filters
+
 ```{.html #main-content}
-<h3 class="tryit-header">Try it!</h3>
+<h3 class="filters-header">Filters (incomplete)</h3>
+<div class="container">
+  <p>{{short-filter-description}}</p>
+</div>
+
+<div class="code-block">
+  <div class="container">
+    <div class="seven columns">
+      <pre>
+        <code class="code">
+{{filter-zangle-code-block}}
+        </code>
+      </pre>
+    </div>
+
+    <div class="five columns">
+      <pre>
+        <code class="code">
+{{filter-zig-code-block}}
+        </code>
+      </pre>
+    </div>
+  </div>
+</div>
+```
+
+```{.txt #short-filter-description}
+<span class="zangle">Zangle</span> supports both inline and external filters on
+placeholders which enable running additional tools over the tangled code block
+before it's written to the document.
+```
+
+~~~{.txt delimiter="chevron" #filter-zangle-code-block}
+
+```{.html delimiter="brace" #html-escape-example}
+&lt;html&gt;
+  &lt;head&gt;
+    &lt;meta charset="utf-8"/&gt;
+    &lt;title&gt;Zangle - Iterate over filenames&lt;/title&gt;
+  &lt;/head&gt;
+  &lt;body&gt;
+    &lt;pre&gt;
+      &lt;code&gt;
+        {{example-code-block:escape html}}
+      &lt;/code&gt;
+    &lt;/pre&gt;
+  &lt;/body&gt;
+&lt;/html&gt;
+```
+
+Serve the code sample!
+
+```{.zig #static-site-example}
+text = {{html-escape-example:escape python-multi-string}}
+
+@app.route("/", accept=["GET"])
+def index():
+    return text
+```
+~~~
+
+~~~{.txt delimiter="chevron" #filter-zig-code-block}
+
+```{.zig #example-code-block}
+{{imports}}
+
+pub fn main() !void {
+    const text = try cwd().readFileAlloc(
+        gpa,
+        "filters.md",
+    );
+    defer gpa.free(text);
+
+    var tree = try parse(gpa, text, .{});
+    defer tree.deinit();
+
+    try stdout.writeAll("&lt;ul&gt;");
+
+    var it = tree.query(.filename);
+    while (it.next()) |filename| {
+        try stdout.print(
+            \\&lt;li&gt;{s}&lt;/li&gt;
+        , .{filename});
+    }
+
+    try stdout.writeAll("&lt;/ul&gt;");
+}
+```
+~~~
+
+```{.css #main-block}
+.filters-header {
+  color: {{filters-colour}};
+  text-align: center;
+}
+```
+
+## Usable from C
+
+```{.html #main-content}
+<h3 class="c-header">Usable from C (incomplete)</h3>
+<div class="container">
+  <p>{{c-description}}</p>
+</div>
+```
+
+```{.html #c-description}
+<span class="zangle">Zangle</span> is usable as a C library too.
+```
+
+```{.css #main-block}
+.c-header {
+  color: {{c-colour}};
+  text-align: center;
+}
+```
+
+## Try it!
+
+```{.html #main-content}
+<h3 class="tryit-header">Try it! (incomplete)</h3>
 <div class="container">
   <span class="nine columns">
     <textarea id="tryit-block" class="tryit-block"></textarea>
@@ -179,7 +305,7 @@ Try it
 
 ```{.css #main-block}
 .tryit-header {
-  color: {{logo-colour}};
+  color: {{tryit-colour}};
   text-align: center;
 }
 .tryit-block {
@@ -271,10 +397,10 @@ p { font-size: 1.5em; }
 | `#999999`{.css #lighter-grey}                    |
 | `#cfd2cb`{.css #lightest-grey}                   |
 | `#00a6d4`{.css #cyan}                            |
-| `#007bb6`{.css #blue}                            |
-| `#2bb37c`{.css #green}                           |
+| `#007bb6`{.css #blue #tryit-colour}              |
+| `#2bb37c`{.css #green #filters-colour}           |
 | `#5168a4`{.css #purple #logo-colour}             |
-| `#664270`{.css #magenta}                         |
+| `#664270`{.css #magenta #c-colour}               |
 | `#1d2021`{.css #blue-grey #code-block-colour}    |
 | `#eeeeee`{.css #paper-white #code-normal-colour} |
 
