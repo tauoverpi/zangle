@@ -21,20 +21,36 @@ pub fn build(b: *std.build.Builder) !void {
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
     const mode = b.standardReleaseOptions();
 
+    const web = try lib.build.TangleFilesStep.init(b);
+    web.delimiter = .brace;
+    try web.addFile("docs/index.md");
+
+    const web_step = b.step("web", "Generate github pages site");
+    web_step.dependOn(&web.step);
+
     const tangler = try lib.build.TangleFilesStep.init(b);
     try tangler.addFile("docs/zangle.md");
+    try tangler.addFile("docs/zangle/configuration.md");
+    try tangler.addFile("docs/license.md");
+
+    const weave_pretty = try lib.build.WeaveStep.init(b, .pandoc, "out/zangle-pretty.md");
+    try weave_pretty.addFile("docs/zangle.md");
+    try weave_pretty.addFile("docs/zangle/configuration.md");
+    try weave_pretty.addFile("docs/license.md");
+
+    const weaver = try lib.build.WeaveStep.init(b, .github, "README.md");
+    try weaver.addFile("docs/zangle.md");
+    try weaver.addFile("docs/zangle/configuration.md");
+
+    const doctest = try lib.build.DocTestStep.init(b);
+    try doctest.addFile("docs/zangle.md");
+    try doctest.addFile("docs/zangle/configuration.md");
 
     const tangle_step = b.step("tangle", "Extract executable code from documentation");
     tangle_step.dependOn(&tangler.step);
 
-    const weaver = try lib.build.WeaveStep.init(b, .github, "README.md");
-    try weaver.addFile("docs/zangle.md");
-
     const weave_step = b.step("weave", "Pretty print documentation");
     weave_step.dependOn(&weaver.step);
-
-    const doctest = try lib.build.DocTestStep.init(b);
-    try doctest.addFile("docs/zangle.md");
 
     const doctest_step = b.step("doctest", "Extract executable code from documentation and run zig test");
     doctest_step.dependOn(&doctest.step);
@@ -49,9 +65,6 @@ pub fn build(b: *std.build.Builder) !void {
     exe.addPackage(pkgs.zangle);
     exe.addLibPath("lib/lib.zig");
     exe.install();
-
-    const weave_pretty = try lib.build.WeaveStep.init(b, .pandoc, "out/zangle-pretty.md");
-    try weave_pretty.addFile("docs/zangle.md");
 
     const pandoc_step = try pandoc(b, &.{ "out/zangle-pretty.md", "-o", "out/manual.pdf" });
     pandoc_step.step.dependOn(&weave_pretty.step);
@@ -78,6 +91,12 @@ pub fn build(b: *std.build.Builder) !void {
     const lib_test_step = b.step("test-lib", "Run library unit tests");
     lib_test_step.dependOn(doctest_step);
     lib_test_step.dependOn(&b.addTest("lib/lib.zig").step);
+
+    const all_step = b.step("all", "run all steps in the same order as the workflow");
+    all_step.dependOn(&exe.step);
+    all_step.dependOn(weave_step);
+    all_step.dependOn(lib_test_step);
+    all_step.dependOn(test_step);
 }
 
 fn pandoc(b: *Builder, args: []const []const u8) !*RunStep {

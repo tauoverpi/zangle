@@ -1,3 +1,14 @@
+\break
+
+# License
+
+
+```{.txt #copyright-comment}
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2021 Simon A. Nielsen Knights
+```
+
+```{.txt file="LICENSE"}
 MIT License
 
 Copyright (c) 2021 Simon A. Nielsen Knights
@@ -19,3 +30,5 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
+
