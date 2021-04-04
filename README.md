@@ -6,7 +6,8 @@ similar to [entangled] with integration with the Zig build system.
 
 TODO:
 
-- [ ] weave - remove constructs github markdown doesn't support
+- [ ] weave - extract metadata (e.g title) from the YAML block and render it for github markdown
+- [x] weave - remove constructs github markdown doesn't support (excluding things which don't clash with the format)
 - [ ] weave - doctest rendering
 - [ ] doctest - custom command runners
 - [ ] doctest - expected output test
