@@ -47,6 +47,9 @@ fn make(step: *Step) !void {
     var stack = ArrayList(Tree.RenderNode).init(self.builder.allocator);
     defer stack.deinit();
 
+    var scratch = ArrayList(u8).init(self.builder.allocator);
+    defer scratch.deinit();
+
     var source = ArrayList(u8).init(self.builder.allocator);
     for (self.source.items) |item| switch (item) {
         .text => |text| try source.appendSlice(text),
@@ -68,6 +71,6 @@ fn make(step: *Step) !void {
         if (fs.path.dirname(filename)) |dir| try self.builder.makePath(dir);
         var file = try fs.cwd().createFile(filename, .{ .truncate = true });
         defer file.close();
-        try tree.tangle(&stack, root, file.writer());
+        try tree.tangle(&stack, &scratch, root, file.writer());
     }
 }

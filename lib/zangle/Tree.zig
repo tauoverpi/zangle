@@ -4,6 +4,7 @@ const assert = std.debug.assert;
 const mem = std.mem;
 const meta = std.meta;
 const Allocator = std.mem.Allocator;
+const ArrayList = std.ArrayList;
 
 const Tokenizer = @import("Tokenizer.zig");
 const Token = Tokenizer.Token;
@@ -85,6 +86,8 @@ pub const RenderNode = struct {
     offset: usize,
     indent: Parser.Indent,
     trail: []Node.Index,
+    depth: ?usize = null,
+    stack: usize = undefined,
 };
 
 fn getString(tree: Tree, node: Node.Index) []const u8 {
@@ -108,14 +111,41 @@ fn getString(tree: Tree, node: Node.Index) []const u8 {
 pub fn filename(tree: Tree, root: RootIndex) []const u8 {
     const tokens = tree.nodes.items(.token);
     const name = tree.getString(tokens[root.index - 1]);
-    return name[1 .. name.len - 1];
+    return name;
 }
 
-pub fn tangle(tree: Tree, stack: *std.ArrayList(RenderNode), root: RootIndex, writer: anytype) !void {
+const Filter = enum {
+    escape,
+};
+
+const builtin_filters = std.ComptimeStringMap(Filter, .{
+    .{ "escape", .escape },
+});
+
+const EscapeFilter = enum {
+    html,
+    zig_string,
+};
+
+const escape_filter_mode = std.ComptimeStringMap(EscapeFilter, .{
+    .{ "html", .html },
+    .{ "zig-string", .zig_string },
+});
+
+pub fn tangle(
+    tree: Tree,
+    stack: *ArrayList(RenderNode),
+    scratch: *ArrayList(u8),
+    root: RootIndex,
+    writer: anytype,
+) !void {
+    // The Game, you just lost it
     const tags = tree.nodes.items(.tag);
     const tokens = tree.nodes.items(.token);
     const starts = tree.tokens.items(.start);
     const data = tree.nodes.items(.data);
+
+    scratch.shrinkRetainingCapacity(0);
 
     try stack.append(.{
         .node = root.index + 1,
@@ -125,6 +155,8 @@ pub fn tangle(tree: Tree, stack: *std.ArrayList(RenderNode), root: RootIndex, wr
         .trail = &.{},
     });
 
+    var depth: usize = 1;
+    var filter: ?usize = null;
     var indent: Parser.Indent = 0;
 
     while (stack.items.len > 0) {
@@ -142,7 +174,22 @@ pub fn tangle(tree: Tree, stack: *std.ArrayList(RenderNode), root: RootIndex, wr
 
             _ = stack.pop();
 
+            if (filter) |f_depth| {
+                if (f_depth == depth) {
+                    const level = testing.log_level;
+                    testing.log_level = .debug;
+                    std.log.info("render hit", .{});
+                    testing.log_level = level;
+                    filter = depth;
+
+                    filter = null;
+                }
+            }
+
+            depth -= 1;
+
             for (item.trail) |_, i| {
+                depth += 1;
                 const trail = item.trail[(item.trail.len - 1) - i];
                 try stack.append(.{
                     .node = trail + 1,
@@ -157,7 +204,9 @@ pub fn tangle(tree: Tree, stack: *std.ArrayList(RenderNode), root: RootIndex, wr
             stack.items[index].last = item.node;
             stack.items[index].offset = 2;
 
-            const slice = tree.getTokenSlice(tokens[item.node]);
+            const token = tokens[item.node];
+            const slice = tree.getTokenSlice(token);
+            const maybe_sep = tree.getToken(token + 1);
             const node = tree.name_map.get(slice) orelse return error.UnboundPlaceholder;
             const start = tokens[item.last] + @intCast(Node.Index, item.offset);
             const end = tokens[item.node] - 1;
@@ -165,6 +214,22 @@ pub fn tangle(tree: Tree, stack: *std.ArrayList(RenderNode), root: RootIndex, wr
             try tree.renderBlock(start, end, item.indent, writer);
 
             for (stack.items) |prev| if (prev.node == node.head) return error.CycleDetected;
+
+            depth += 1;
+
+            if (maybe_sep.tag == .fence) {
+                const level = testing.log_level;
+                testing.log_level = .debug;
+                std.log.info("builtin filter hit", .{});
+                testing.log_level = level;
+                filter = depth;
+            } else if (maybe_sep.tag == .pipe) {
+                const level = testing.log_level;
+                testing.log_level = .debug;
+                std.log.info("external filter hit", .{});
+                testing.log_level = level;
+                filter = depth;
+            }
 
             try stack.append(.{
                 .node = node.head + 1,
@@ -175,6 +240,8 @@ pub fn tangle(tree: Tree, stack: *std.ArrayList(RenderNode), root: RootIndex, wr
             });
         }
     }
+
+    assert(depth == 0);
 }
 
 fn testTangle(input: []const u8, expected: []const []const u8) !void {
@@ -183,16 +250,19 @@ fn testTangle(input: []const u8, expected: []const []const u8) !void {
     var tree = try Tree.parse(allocator, input, .{});
     defer tree.deinit(std.testing.allocator);
 
-    var stream = std.ArrayList(u8).init(allocator);
+    var stream = ArrayList(u8).init(allocator);
     defer stream.deinit();
 
-    var stack = std.ArrayList(Tree.RenderNode).init(allocator);
+    var stack = ArrayList(Tree.RenderNode).init(allocator);
     defer stack.deinit();
+
+    var scratch = ArrayList(u8).init(allocator);
+    defer scratch.deinit();
 
     for (expected) |expect, i| {
         defer stream.shrinkRetainingCapacity(0);
 
-        try tree.tangle(&stack, tree.roots[i], stream.writer());
+        try tree.tangle(&stack, &scratch, tree.roots[i], stream.writer());
 
         testing.expectEqualStrings(expect, stream.items);
     }
@@ -463,7 +533,7 @@ fn testWeave(weaver: Weaver, input: []const u8, expected: []const u8) !void {
     var tree = try Tree.parse(allocator, input, .{});
     defer tree.deinit(allocator);
 
-    var stream = std.ArrayList(u8).init(allocator);
+    var stream = ArrayList(u8).init(allocator);
     defer stream.deinit();
 
     try tree.weave(weaver, stream.writer());

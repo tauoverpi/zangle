@@ -335,7 +335,6 @@ fn parseString(p: *Parser) ![]const u8 {
 
     while (true) switch (try p.consume()) {
         .newline => return error.IllegalByteInString,
-        .eof => return error.UnexpectedEof,
         .string => return p.text[start .. p.getToken(p.index).data.start - 1],
         else => {
             // allow other tokens
@@ -422,8 +421,29 @@ fn parsePlaceholders(p: *Parser, start: usize, end: usize, block: bool) !void {
     var last = p.index;
     while (mem.indexOfPos(Tokenizer.Token.Tag, tokens[0..end], p.index, &.{.l_chevron})) |found| {
         p.index = found + 1;
+        const chevron = p.index - 1;
         const name = p.get(.identifier) catch continue;
-        const chev = p.get(.r_chevron) catch continue;
+        const chev = blk: {
+            //p.get(.r_chevron) catch continue;
+            switch (try p.consume()) {
+                .r_chevron => break :blk p.getTokenSlice(p.index - 1),
+                .pipe => while (true) {
+                    if ((try p.consume()) == .r_chevron) {
+                        break :blk p.getTokenSlice(p.index - 1);
+                    }
+                } else continue,
+                .fence => {
+                    const fence = p.getTokenSlice(p.index - 1);
+                    if (fence.len == 1 and fence[0] == ':') {
+                        while (true) if ((try p.consume()) == .r_chevron) {
+                            break :blk p.getTokenSlice(p.index - 1);
+                        };
+                    }
+                    continue;
+                },
+                else => continue,
+            }
+        };
 
         switch (p.delimiter) {
             .none => continue,
@@ -435,8 +455,8 @@ fn parsePlaceholders(p: *Parser, start: usize, end: usize, block: bool) !void {
 
         var indent: usize = 0;
 
-        if (mem.lastIndexOfScalar(Tokenizer.Token.Tag, tokens[0 .. p.index - 1], .newline)) |nl| {
-            const here = p.getToken(p.index - 3);
+        if (mem.lastIndexOfScalar(Tokenizer.Token.Tag, tokens[0..chevron], .newline)) |nl| {
+            const here = p.getToken(chevron);
             const newline = p.getToken(nl);
             indent = here.data.start - newline.data.end;
         }

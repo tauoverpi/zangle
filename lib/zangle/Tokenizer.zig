@@ -37,6 +37,7 @@ pub const Token = struct {
         line_fence,
         l_brace,
         r_brace,
+        pipe,
         dot,
         identifier,
         equal,
@@ -100,6 +101,12 @@ pub fn next(self: *Tokenizer) Token {
                     break;
                 },
 
+                '|' => {
+                    token.tag = .pipe;
+                    self.index += 1;
+                    break;
+                },
+
                 // longer tokens require scanning further to fully resolve them
 
                 '.' => {
@@ -152,6 +159,7 @@ pub fn next(self: *Tokenizer) Token {
 
             .ignore => switch (c) {
                 // All valid start characters that this must break on
+                '|',
                 '(',
                 '.',
                 '#',
@@ -310,6 +318,8 @@ test "caption" {
         .space,
         .identifier,
         .equal,
+        .string,
+        .identifier,
         .string,
         .r_brace,
         .newline,

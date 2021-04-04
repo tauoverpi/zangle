@@ -47,6 +47,9 @@ fn make(step: *Step) !void {
     var stack = ArrayList(Tree.RenderNode).init(self.builder.allocator);
     defer stack.deinit();
 
+    var scratch = ArrayList(u8).init(self.builder.allocator);
+    defer scratch.deinit();
+
     var source = ArrayList(u8).init(self.builder.allocator);
     for (self.source.items) |item| switch (item) {
         .text => |text| try source.appendSlice(text),
@@ -89,7 +92,7 @@ fn make(step: *Step) !void {
             var file = try fs.cwd().createFile(filename, .{ .truncate = true });
             defer file.close();
 
-            try tree.tangle(&stack, .{ .index = root.index }, file.writer());
+            try tree.tangle(&stack, &scratch, .{ .index = root.index }, file.writer());
         }
 
         const result = try std.ChildProcess.exec(.{
