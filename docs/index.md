@@ -119,6 +119,7 @@ with pandoc markdown in the form of a library with a command-line frontend.
 
 
 ```{.zig #example-code-block}
+
 const std = @import("std");
 const zangle = @import("zangle");
 
@@ -174,7 +175,7 @@ pub fn main() !void {
     <div class="seven columns">
       <pre>
         <code class="code">
-{{filter-zangle-code-block}}
+{{filter-zangle-code-block:escape html}}
         </code>
       </pre>
     </div>
@@ -182,7 +183,7 @@ pub fn main() !void {
     <div class="five columns">
       <pre>
         <code class="code">
-{{filter-zig-code-block}}
+{{filter-zig-code-block:escape html}}
         </code>
       </pre>
     </div>
@@ -196,7 +197,7 @@ placeholders which enable running additional tools over the tangled code block
 before it's written to the document.
 ```
 
-~~~{.txt delimiter="chevron" #filter-zangle-code-block}
+~~~{.txt delimiter="none" #filter-zangle-code-block}
 
 ```{.html delimiter="brace" #html-escape-example}
 &lt;html&gt;
@@ -217,7 +218,7 @@ before it's written to the document.
 Serve the code sample!
 
 ```{.zig #static-site-example}
-text = {{html-escape-example:escape python-multi-string}}
+text = &lt;&lt;html-escape-example:escape python-multi-string&gt;&gt;
 
 @app.route("/", accept=["GET"])
 def index():
@@ -225,10 +226,10 @@ def index():
 ```
 ~~~
 
-~~~{.txt delimiter="chevron" #filter-zig-code-block}
+~~~{.txt delimiter="none" #filter-zig-code-block}
 
 ```{.zig #example-code-block}
-{{imports}}
+&lt;&lt;imports&gt;&gt;
 
 pub fn main() !void {
     const text = try cwd().readFileAlloc(
@@ -261,17 +262,17 @@ pub fn main() !void {
 }
 ```
 
-## Usable from C
+## Usable from C and the web
 
 ```{.html #main-content}
-<h3 class="c-header">Usable from C (incomplete)</h3>
+<h3 class="c-header">Usable from C and the web (incomplete)</h3>
 <div class="container">
   <p>{{c-description}}</p>
 </div>
 ```
 
 ```{.html #c-description}
-<span class="zangle">Zangle</span> is usable as a C library too.
+<span class="zangle">Zangle</span> is usable as a C library and WASM module.
 ```
 
 ```{.css #main-block}
@@ -322,10 +323,10 @@ Try it
 ```{.html #footer}
 <div class="container">
   <div class="row">
-    <span class="two columns">
+    <span class="three columns">
       {{first-row-links}}
     </span>
-    <span class="four columns">
+    <span class="three columns">
       <div>a</div>
       <div>a</div>
       <div>a</div>

@@ -163,7 +163,8 @@
         <div class="container">
           <pre>
             <code class="code">
-      const std = @import("std");
+      
+const std = @import("std");
 const zangle = @import("zangle");
 
 pub fn main() !void {
@@ -213,12 +214,12 @@ pub fn main() !void {
 Serve the code sample!
 
 ```{.zig #static-site-example}
-text = {{html-escape-example:escape python-multi-string}}
+text = &lt;&lt;html-escape-example:escape python-multi-string&gt;&gt;
 
 @app.route("/", accept=["GET"])
 def index():
     return text
-```
+```escape html}}
               </code>
             </pre>
           </div>
@@ -228,7 +229,7 @@ def index():
               <code class="code">
       
 ```{.zig #example-code-block}
-{{imports}}
+&lt;&lt;imports&gt;&gt;
 
 pub fn main() !void {
     const text = try cwd().readFileAlloc(
@@ -251,14 +252,14 @@ pub fn main() !void {
 
     try stdout.writeAll("&lt;/ul&gt;");
 }
-```
+```escape html}}
               </code>
             </pre>
           </div>
         </div>
-      </div><h3 class="c-header">Usable from C (incomplete)</h3>
+      </div><h3 class="c-header">Usable from C and the web (incomplete)</h3>
       <div class="container">
-        <p><span class="zangle">Zangle</span> is usable as a C library too.</p>
+        <p><span class="zangle">Zangle</span> is usable as a C library and WASM module.</p>
       </div><h3 class="tryit-header">Try it! (incomplete)</h3>
       <div class="container">
         <span class="nine columns">
@@ -276,7 +277,7 @@ pub fn main() !void {
     <div class="section footer">
       <div class="container">
         <div class="row">
-          <span class="two columns">
+          <span class="three columns">
             <ul>
         <li>Github</li>
         <li>a</li>
@@ -284,7 +285,7 @@ pub fn main() !void {
         <li>c</li>
       </ul>
           </span>
-          <span class="four columns">
+          <span class="three columns">
             <div>a</div>
             <div>a</div>
             <div>a</div>

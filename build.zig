@@ -97,6 +97,7 @@ pub fn build(b: *std.build.Builder) !void {
     all_step.dependOn(weave_step);
     all_step.dependOn(lib_test_step);
     all_step.dependOn(test_step);
+    all_step.dependOn(web_step);
 }
 
 fn pandoc(b: *Builder, args: []const []const u8) !*RunStep {

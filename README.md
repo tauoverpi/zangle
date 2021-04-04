@@ -1,3 +1,5 @@
+![Zangle logo](assets/svg/zangle.svg?raw=true)
+
 # Abstract
 
 Zangle is a tool and a library for extracting executable segments of code from
@@ -9,10 +11,69 @@ TODO:
 - [ ] weave - extract metadata (e.g title) from the YAML block and render it for github markdown
 - [x] weave - remove constructs github markdown doesn't support (excluding things which don't clash with the format)
 - [ ] weave - doctest rendering
+- [ ] weave - handle blocks marked as `.inline`
 - [ ] doctest - custom command runners
 - [ ] doctest - expected output test
 - [ ] remove this list once all entries have been resolved and switch to issues
 
+## Introduction
+
+TODO explain blocks
+
+**main-imports**
+```zig
+const std = @import("std");
+const testing = std.testing;
+
+const lib = @import("lib");
+const Delimiter = lib.Parser.Delimiter;
+
+const config = @import("config.zig");
+```
+
+The module also makes sure to reference all definitions within locally
+imported modules such as the configuration module through Zig's testing
+module using `testing.refAllDecls(config)`.
+
+**main**
+```zig
+<<copyright-comment>>
+
+<<main-imports>>
+
+test {
+    <<main-test-case>>;
+}
+
+const Configuration = struct {
+    <<cli-parameters>>
+};
+
+pub fn main() !void {
+    // TODO
+}
+```
+
+In this document the inline code block in the description above the `main` code
+block is marked with ` {.zig #main-test-case}`
+allowing the code within to be inlined anywhere using it's placeholder form
+`<<main-test-case>>` which will inline without a trailing newline. The same
+is used within the configuration parameters section in @tbl:configuration-parameters,
+@tbl:configuration-shorthand, @tbl:configuration-delimiters, and in other places
+ensure the document is kept in sync with the implementation.
+
+TODO: render some visual aid such that it's possible to see that the inline
+block is indeed related to the code below it. Maybe inline the text too with
+the hint?
+
+
+## Building
+
+```
+zig build
+```
+[pandoc]: pandoc.org
+[entangled]: https://entangled.github.io/
 # Configuration
 
 Configuration can be given both on the command-line or via a configuration file
@@ -36,44 +97,11 @@ named `.zangle` residing within the current directory. The options are as follow
 | `chevron` | `<< >>`                                                  |
 | `brace`   | `{{ }}`                                                  |
 
-: Delimiters {#tbl:configuration-delimiters}
+: Delimiters for code-block placeholders {#tbl:configuration-delimiters}
 
 
 ## Command-line arguments
 
-**command-line-argument-union**
-```zig
-pub const Arg = union(enum) {
-    short: u8,
-    long: []const u8,
-    file: []const u8,
-    pair: Pair,
-};
-```
-
-**command-line-iterator**
-```zig
-const State = enum {
-    start,
-    filename,
-};
-```
-
-**command-line-iterator**
-```zig
-const short_options = ComptimeStringMap(State, .{
-    .{ "f", .filename },
-    .{ "o", .filename },
-});
-```
-
-**command-line-iterator**
-```zig
-const long_options = ComptimeStringMap(State, .{
-    .{ "file", .filename },
-    .{ "output", .filename },
-});
-```
 
 **command-line-iterator**
 ```zig
@@ -86,66 +114,102 @@ pub fn CliIterator(comptime short: anytype, comptime long: anytype) type {
         index: usize = 0,
 
         <<iterator-one-of>>
+
         <<iterator-expect>>
 
-        <<command-line-argument-union>>
+        pub const Arg = union(enum) {
+            short: u8,
+            long: []const u8,
+            file: []const u8,
+            pair: Pair,
+        };
+
 
         const Self = @This();
 
-        pub fn next(it: *Self) !?Arg {
-            <<command-line-iterator-next>>
-        }
+        <<command-line-iterator-next>>
+
     };
 }
+
+
+pub const State = enum {
+    start,
+    filename,
+};
+
+const short_options = ComptimeStringMap(State, .{
+    .{ "f", .filename },
+    .{ "o", .filename },
+});
+
+const long_options = ComptimeStringMap(State, .{
+    .{ "file", .filename },
+    .{ "output", .filename },
+});
+
 ```
+
 
 **command-line-iterator-next**
 ```zig
-it.token = Tokenizer{ .text = it.args[it.index] };
-it.index += 1;
+pub fn next(it: *Self) !?Arg {
+    it.token = Tokenizer{ .text = it.args[it.index] };
+    it.index += 1;
 
-while (true) {
-    switch (it.state) {
-        .start => switch ((try it.oneOf(&.{.line_fence})).len()) {
-            1 => {
-                const byte = try it.oneOf(&.{.identifier});
-                if (byte.len() != 1) return error.InvalidShortOption;
+    while (true) {
+        switch (it.state) {
+            .start => switch ((try it.oneOf(&.{.line_fence})).len()) {
+                1 => {
+                    const byte = try it.oneOf(&.{.identifier});
+                    if (byte.len() != 1) return error.InvalidShortOption;
 
-                const text = byte.slice(it.token.text);
-                it.state = short.get(text) orelse .start;
+                    <<cli-iterator-redirection>>
 
-                return Arg{ .short = text[0] };
+                    return Arg{ .short = text[0] };
+                },
+
+                2 => {
+                    const key = try it.oneOf(&.{.identifier});
+                    switch (it.token.next().tag) {
+                        .eof => {
+                            const text = key.slice(it.token.text);
+                            it.state = long.get(text) orelse .start;
+                            return Arg{ .long = text };
+                        },
+
+                        .equal => {
+                            return Arg{ .pair = .{
+                                .key = key.slice(it.token.text),
+                                .value = it.token.text[it.token.index..],
+                            } };
+                        },
+
+                        else => return error.InvalidOption,
+                    }
+                },
+
+                else => return error.InvalidOption,
             },
 
-            2 => {
-                const key = try it.oneOf(&.{.identifier});
-                switch (it.token.next().tag) {
-                    .eof => {
-                        const text = key.slice(it.token.text);
-                        it.state = long.get(text) orelse .start;
-                        return Arg{ .long = text };
-                    },
-
-                    .equal => {
-                        return Arg{ .pair = .{
-                            .key = key.slice(it.token.text),
-                            .value = it.token.text[it.token.index..],
-                        } };
-                    },
-
-                    else => return error.InvalidOption,
-                }
+            .filename => {
+                it.state = .start;
+                return Arg{ .file = it.token.text };
             },
-
-            else => return error.InvalidOption,
-        },
-
-        .filename => {
-            it.state = .start;
-            return Arg{ .file = it.token.text };
-        },
+        }
     }
 }
+```
+
+
+The parsing loop itself uses `ComptimeStringMap` to redirect flow to
+handle arguments which take a parameter after the flag. The choice is to make
+playing with different ways to express options easier.
+
+**cli-iterator-redirection**
+```zig
+const text = byte.slice(it.token.text);
+it.state = short.get(text) orelse .start;
 ```
 
 **command-line-iterator**
@@ -176,78 +240,82 @@ const ConfigIterator = struct {
     failed: ?Token = null,
 
     <<iterator-one-of>>
+
     <<iterator-expect>>
 
+    <<iterator-consume>>
+
     pub fn next(it: *ConfigIterator) !?Pair {
-        <<configuration-iterator-next>>
-    }
-};
-```
+        const key: Token = found: {
+            while (true) {
+                const token = it.token.next();
+                switch (token.tag) {
+                    .identifier => break :found token,
 
-**configuration-iterator-next**
-```zig
-const key: Token = found: {
-    while (true) {
-        const token = it.token.next();
-        switch (token.tag) {
-            .identifier => break :found token,
+                    .hash => while (true) {
+                        switch (it.token.next().tag) {
+                            .newline => break,
+                            .eof => return null,
+                            else => {},
+                        }
+                    },
 
-            .hash => while (true) {
-                switch (it.token.next().tag) {
-                    .newline => break,
                     .eof => return null,
-                    else => {},
+
+                    else => {
+                        it.failed = token;
+                        return error.ExpectedKey;
+                    },
                 }
-            },
+            }
+        };
 
-            .eof => return null,
+        try it.expect(.space);
+        try it.expect(.equal);
+        try it.expect(.space);
 
+        const value = blk: {
+            const tmp = try it.oneOf(&.{ .identifier, .string });
+            switch (tmp.tag) {
+                .identifier => break :blk it.token.text[tmp.data.start..tmp.data.end],
+                .string => while (true) {
+                    const token = try it.consume();
+                    switch (token.tag) {
+                        .string => break :blk it.token.text[tmp.data.end..token.data.start],
+                        .newline => return error.UnexpectedNewline,
+                        else => {},
+                    }
+                } else return error.StringNotClosed,
+                else => unreachable,
+            }
+        };
+
+        const eol = it.token.next();
+        switch (eol.tag) {
+            .newline => {},
+            .eof => {},
             else => {
-                it.failed = token;
-                return error.ExpectedKey;
+                it.failed = eol;
+                return error.UnexpectedLineTerminator;
             },
         }
+
+        return Pair{
+            .key = it.token.text[key.data.start..key.data.end],
+            .value = value,
+        };
     }
 };
-
 ```
 
-**configuration-iterator-next**
+**iterator-consume**
 ```zig
-try it.expect(.space);
-try it.expect(.equal);
-try it.expect(.space);
-
-```
-
-**configuration-iterator-next**
-```zig
-var value = try it.oneOf(&.{ .identifier, .string });
-if (value.tag == .string) {
-    value.data.start += 1;
-    value.data.end -= 1;
+fn consume(it: *@This()) !Token {
+    const found = it.token.next();
+    if (found.tag == .eof) return error.UnexpectedEof;
+    return found;
 }
-
-const eol = it.token.next();
-switch (eol.tag) {
-    .newline => {},
-    .eof => {},
-    else => {
-        it.failed = eol;
-        return error.UnexpectedLineTerminator;
-    },
-}
-
 ```
-
-**configuration-iterator-next**
-```zig
-return Pair{
-    .key = it.token.text[key.data.start..key.data.end],
-    .value = it.token.text[value.data.start..value.data.end],
-};
-```
-
 
 **iterator-one-of**
 ```zig
@@ -286,6 +354,7 @@ const boolean = ComptimeStringMap(bool, .{
 
 
 ```zig
+<<copyright-comment>>
 const std = @import("std");
 const testing = std.testing;
 const meta = std.meta;
@@ -302,7 +371,9 @@ pub const Pair = struct {
 };
 
 <<command-line-iterator>>
+
 <<configuration-iterator>>
+
 <<configuration-booleans>>
 
 pub fn parse(comptime T: type, text: []const u8) !T {
@@ -371,29 +442,3 @@ test "parse application config spec" {
 ```
 
 
-```zig
-const std = @import("std");
-const testing = std.testing;
-const ArenaAllocator = std.heap.ArenaAllocator;
-
-const lib = @import("lib");
-const Delimiter = lib.Parser.Delimiter;
-
-const config = @import("config.zig");
-
-test {
-    testing.refAllDecls(config);
-}
-
-const gpa = std.heap.page_allocator;
-
-const Spec = struct {
-    <<z-parameters>>
-};
-
-pub fn main() !void {
-}
-```
-
-[pandoc]: pandoc.org
-[entangled]: https://entangled.github.io/

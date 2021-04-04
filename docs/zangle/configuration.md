@@ -162,6 +162,8 @@ const ConfigIterator = struct {
 
     <<iterator-expect>>
 
+    <<iterator-consume>>
+
     pub fn next(it: *ConfigIterator) !?Pair {
         const key: Token = found: {
             while (true) {
@@ -191,11 +193,21 @@ const ConfigIterator = struct {
         try it.expect(.equal);
         try it.expect(.space);
 
-        var value = try it.oneOf(&.{ .identifier, .string });
-        if (value.tag == .string) {
-            value.data.start += 1;
-            value.data.end -= 1;
-        }
+        const value = blk: {
+            const tmp = try it.oneOf(&.{ .identifier, .string });
+            switch (tmp.tag) {
+                .identifier => break :blk it.token.text[tmp.data.start..tmp.data.end],
+                .string => while (true) {
+                    const token = try it.consume();
+                    switch (token.tag) {
+                        .string => break :blk it.token.text[tmp.data.end..token.data.start],
+                        .newline => return error.UnexpectedNewline,
+                        else => {},
+                    }
+                } else return error.StringNotClosed,
+                else => unreachable,
+            }
+        };
 
         const eol = it.token.next();
         switch (eol.tag) {
@@ -209,10 +221,18 @@ const ConfigIterator = struct {
 
         return Pair{
             .key = it.token.text[key.data.start..key.data.end],
-            .value = it.token.text[value.data.start..value.data.end],
+            .value = value,
         };
     }
 };
+```
+
+```{.zig #iterator-consume}
+fn consume(it: *@This()) !Token {
+    const found = it.token.next();
+    if (found.tag == .eof) return error.UnexpectedEof;
+    return found;
+}
 ```
 
 ```{.zig #iterator-one-of}
@@ -266,7 +286,9 @@ pub const Pair = struct {
 };
 
 <<command-line-iterator>>
+
 <<configuration-iterator>>
+
 <<configuration-booleans>>
 
 pub fn parse(comptime T: type, text: []const u8) !T {
