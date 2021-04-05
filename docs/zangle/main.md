@@ -33,33 +33,91 @@ TODO explain blocks
 
 ```{.zig #main-imports}
 const std = @import("std");
-const testing = std.testing;
-
 const lib = @import("lib");
-const Delimiter = lib.Parser.Delimiter;
-
-const config = @import("config.zig");
+const testing = std.testing;
+const fs = std.fs;
+const log = std.log;
+const io = std.io;
+const ArrayList = std.ArrayList;
+const Tree = lib.Tree;
 ```
 
 The module also makes sure to reference all definitions within locally
 imported modules such as the configuration module through Zig's testing
 module using `testing.refAllDecls(config)`{.zig #main-test-case}.
 
+```{.zig #main-imports}
+const config = @import("config.zig");
+
+test {
+    <<main-test-case>>;
+}
+```
+
 ```{.zig file="src/main.zig" #main}
 <<copyright-comment>>
 
 <<main-imports>>
 
-test {
-    <<main-test-case>>;
-}
-
-const Configuration = struct {
-    <<cli-parameters>>
-};
+const Configuration = config.Configuration;
 
 pub fn main() !void {
-    // TODO
+    const gpa = std.heap.page_allocator;
+    const args = <<parse-configuration-parameters>>;
+    std.log.debug("{}", .{args});
+
+    var source = ArrayList(u8).init(gpa);
+    defer source.deinit();
+
+    for (args.files.items) |filename| {
+        var file = try fs.cwd().openFile(filename, .{});
+        defer file.close();
+
+        try file.reader().readAllArrayList(&source, 0xffff_ffff);
+    }
+
+    var tree = try Tree.parse(gpa, source.items, .{
+        .delimiter = args.delimiter,
+    });
+    defer tree.deinit(gpa);
+
+    if (args.tangle) {
+        var stack = ArrayList(Tree.RenderNode).init(gpa);
+        var scratch = ArrayList(u8).init(gpa);
+        defer stack.deinit();
+        defer scratch.deinit();
+
+        for (tree.roots) |root| {
+            defer stack.shrinkRetainingCapacity(0);
+            const filename = tree.filename(root);
+            log.info("writing {s}", .{filename});
+
+            var file = try fs.cwd().createFile(filename, .{
+                .truncate = true,
+            });
+            defer file.close();
+
+            var stream = io.bufferedWriter(file.writer());
+
+            try tree.tangle(&stack, &scratch, root, stream.writer());
+
+            try stream.flush();
+        }
+    }
+
+    if (args.weave) |filename| {
+        var file = try fs.cwd().createFile(filename, .{
+            .truncate = true,
+        });
+
+        defer file.close();
+
+        var stream = io.bufferedWriter(file.writer());
+
+        try tree.weave(args.format, stream.writer());
+
+        try stream.flush();
+    }
 }
 ```
 

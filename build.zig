@@ -29,21 +29,21 @@ pub fn build(b: *std.build.Builder) !void {
     web_step.dependOn(&web.step);
 
     const tangler = try lib.build.TangleFilesStep.init(b);
-    try tangler.addFile("docs/zangle.md");
+    try tangler.addFile("docs/zangle/main.md");
     try tangler.addFile("docs/zangle/configuration.md");
     try tangler.addFile("docs/license.md");
 
     const weave_pretty = try lib.build.WeaveStep.init(b, .pandoc, "out/zangle-pretty.md");
-    try weave_pretty.addFile("docs/zangle.md");
+    try weave_pretty.addFile("docs/zangle/main.md");
     try weave_pretty.addFile("docs/zangle/configuration.md");
     try weave_pretty.addFile("docs/license.md");
 
     const weaver = try lib.build.WeaveStep.init(b, .github, "README.md");
-    try weaver.addFile("docs/zangle.md");
+    try weaver.addFile("docs/zangle/main.md");
     try weaver.addFile("docs/zangle/configuration.md");
 
     const doctest = try lib.build.DocTestStep.init(b);
-    try doctest.addFile("docs/zangle.md");
+    try doctest.addFile("docs/zangle/main.md");
     try doctest.addFile("docs/zangle/configuration.md");
 
     const tangle_step = b.step("tangle", "Extract executable code from documentation");
@@ -85,7 +85,7 @@ pub fn build(b: *std.build.Builder) !void {
     main_test.addPackage(pkgs.zangle);
 
     const test_step = b.step("test", "Run application unit tests");
-    test_step.dependOn(tangle_step);
+    test_step.dependOn(&fmt_step.step);
     test_step.dependOn(&main_test.step);
 
     const lib_test_step = b.step("test-lib", "Run library unit tests");

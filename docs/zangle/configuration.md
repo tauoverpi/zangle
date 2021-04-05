@@ -1,359 +1,210 @@
 # Configuration
 
-Configuration can be given both on the command-line or via a configuration file
-named `.zangle` residing within the current directory. The options are as follows:
-
-| Option | Description | State |
-| --     | --          | --    |
-| `watch: bool = false,`{.zig #cli-parameters} | Stay open and watch given files for changes. | incomplete |
-| `config: ?[]const u8 = null,`{.zig #cli-parameters} | Give the location of a configuration file to read. | incomplete |
-| `doctest: bool = false,`{.zig #cli-parameters} | Run code within test blocks. If this option is used along with `weave` then the expected result will also be printed. | incomplete |
-| `weave: ?[]const u8 = null,`{.zig #cli-parameters} | Generate a pretty version of the document for compilation to PDF with pandoc. | incomplete |
-| `delimiter: Delimiter = .chevron,`{.zig #cli-parameters} | Override the default placeholder delimites for all blocks. (see @tbl:configuration-delimiters}) | incomplete |
-| `entangle: bool = false,`{.zig #cli-parameters} | Enable entangled mode where changes in generated source files are written back to the document | incomplete |
-| `file: []const []const u8,`{.zig #cli-parameters} | Specify a file to tangle | incomplete |
-
-: Configuration parameters {#tbl:configuration-parameters}
-
-| Style     |                                                          |
-| --        | --                                                       |
-| `ignore`  | None, delimiters are ignored and treated as regular text.|
-| `chevron` | `<< >>`                                                  |
-| `brace`   | `{{ }}`                                                  |
-
-: Delimiters for code-block placeholders {#tbl:configuration-delimiters}
-
-
-## Command-line arguments
-
-
-```{.zig #command-line-iterator}
-pub fn CliIterator(comptime short: anytype, comptime long: anytype) type {
-    return struct {
-        args: []const []const u8,
-        token: Tokenizer = undefined,
-        failed: ?Token = null,
-        state: State = .start,
-        index: usize = 0,
-
-        <<iterator-one-of>>
-
-        <<iterator-expect>>
-
-        pub const Arg = union(enum) {
-            short: u8,
-            long: []const u8,
-            file: []const u8,
-            pair: Pair,
-        };
-
-
-        const Self = @This();
-
-        <<command-line-iterator-next>>
-
-    };
-}
-
-
-pub const State = enum {
-    start,
-    filename,
-};
-
-const short_options = ComptimeStringMap(State, .{
-    .{ "f", .filename },
-    .{ "o", .filename },
-});
-
-const long_options = ComptimeStringMap(State, .{
-    .{ "file", .filename },
-    .{ "output", .filename },
-});
-
-```
-
-
-```{.zig #command-line-iterator-next}
-pub fn next(it: *Self) !?Arg {
-    it.token = Tokenizer{ .text = it.args[it.index] };
-    it.index += 1;
-
-    while (true) {
-        switch (it.state) {
-            .start => switch ((try it.oneOf(&.{.line_fence})).len()) {
-                1 => {
-                    const byte = try it.oneOf(&.{.identifier});
-                    if (byte.len() != 1) return error.InvalidShortOption;
-
-                    <<cli-iterator-redirection>>
-
-                    return Arg{ .short = text[0] };
-                },
-
-                2 => {
-                    const key = try it.oneOf(&.{.identifier});
-                    switch (it.token.next().tag) {
-                        .eof => {
-                            const text = key.slice(it.token.text);
-                            it.state = long.get(text) orelse .start;
-                            return Arg{ .long = text };
-                        },
-
-                        .equal => {
-                            return Arg{ .pair = .{
-                                .key = key.slice(it.token.text),
-                                .value = it.token.text[it.token.index..],
-                            } };
-                        },
-
-                        else => return error.InvalidOption,
-                    }
-                },
-
-                else => return error.InvalidOption,
-            },
-
-            .filename => {
-                it.state = .start;
-                return Arg{ .file = it.token.text };
-            },
-        }
-    }
-}
-```
-
-
-The parsing loop itself uses `ComptimeStringMap`{.zig} to redirect flow to
-handle arguments which take a parameter after the flag. The choice is to make
-playing with different ways to express options easier.
-
-```{.zig .inline #cli-iterator-redirection}
-const text = byte.slice(it.token.text);
-it.state = short.get(text) orelse .start;
-```
-
-```{.zig #command-line-iterator}
-test {
-    var it = CliIterator(short_options, long_options){ .args = &.{
-        "-f",
-        "README.md",
-        "--watch",
-        "--output=file.md",
-        "--tangle"
-    } };
-
-    testing.expectEqual(@as(u8, 'f'), (try it.next()).?.short);
-    testing.expectEqualStrings("README.md", (try it.next()).?.file);
-    testing.expectEqualStrings("watch", (try it.next()).?.long);
-    testing.expectEqualStrings("file.md", (try it.next()).?.pair.value);
-    testing.expectEqualStrings("tangle", (try it.next()).?.long);
-}
-```
-
-## Configuration file parsing
-
-```{.zig #configuration-iterator}
-const ConfigIterator = struct {
-    token: Tokenizer,
-    failed: ?Token = null,
-
-    <<iterator-one-of>>
-
-    <<iterator-expect>>
-
-    <<iterator-consume>>
-
-    pub fn next(it: *ConfigIterator) !?Pair {
-        const key: Token = found: {
-            while (true) {
-                const token = it.token.next();
-                switch (token.tag) {
-                    .identifier => break :found token,
-
-                    .hash => while (true) {
-                        switch (it.token.next().tag) {
-                            .newline => break,
-                            .eof => return null,
-                            else => {},
-                        }
-                    },
-
-                    .eof => return null,
-
-                    else => {
-                        it.failed = token;
-                        return error.ExpectedKey;
-                    },
-                }
-            }
-        };
-
-        try it.expect(.space);
-        try it.expect(.equal);
-        try it.expect(.space);
-
-        const value = blk: {
-            const tmp = try it.oneOf(&.{ .identifier, .string });
-            switch (tmp.tag) {
-                .identifier => break :blk it.token.text[tmp.data.start..tmp.data.end],
-                .string => while (true) {
-                    const token = try it.consume();
-                    switch (token.tag) {
-                        .string => break :blk it.token.text[tmp.data.end..token.data.start],
-                        .newline => return error.UnexpectedNewline,
-                        else => {},
-                    }
-                } else return error.StringNotClosed,
-                else => unreachable,
-            }
-        };
-
-        const eol = it.token.next();
-        switch (eol.tag) {
-            .newline => {},
-            .eof => {},
-            else => {
-                it.failed = eol;
-                return error.UnexpectedLineTerminator;
-            },
-        }
-
-        return Pair{
-            .key = it.token.text[key.data.start..key.data.end],
-            .value = value,
-        };
-    }
+```{.zig #configuration-specification}
+pub const Configuration = struct {
+    tangle: bool = true,
+    delimiter: Delimiter = .chevron,
+    weave: ?[]const u8 = null,
+    format: Weaver = .github,
+    files: ArrayListUnmanaged([]const u8) = .{},
 };
 ```
 
-```{.zig #iterator-consume}
-fn consume(it: *@This()) !Token {
-    const found = it.token.next();
-    if (found.tag == .eof) return error.UnexpectedEof;
-    return found;
-}
-```
+```{.zig #configuration-specification}
+const ConfigTag = meta.FieldEnum(Configuration);
 
-```{.zig #iterator-one-of}
-fn oneOf(it: *@This(), expected: []const Token.Tag) !Token {
-    const found = it.token.next();
-    for (expected) |tag| {
-        if (found.tag == tag) {
-            return found;
-        } else {
-            it.failed = found;
-        }
-    }
-    return error.UnexpectedToken;
-}
-```
+const long = ComptimeStringMap(ConfigTag, .{
+  .{ "tangle", .tangle },
+  .{ "no-tangle", .tangle },
+});
 
-```{.zig #iterator-expect}
-fn expect(it: *@This(), expected: Token.Tag) !void {
-    _ = try it.oneOf(&.{expected});
-}
-```
-
-
-```{.zig #configuration-booleans}
-const boolean = ComptimeStringMap(bool, .{
-    .{ "yes", true },
-    .{ "true", true },
-    .{ "y", true },
-    .{ "no", false },
-    .{ "false", false },
-    .{ "n", false },
+const pair = ComptimeStringMap(ConfigTag, .{
+  .{ "delimiter", .delimiter },
+  .{ "weave", .weave },
+  .{ "format", .format },
 });
 ```
 
+```{.zig #parse-configuration-parameters}
+blk: {
+  var parameters: Configuration = .{};
+
+  try config.parseConfigFile(gpa, &parameters);
+  try config.parseCliArgs(gpa, &parameters);
+
+  break :blk parameters;
+}
+```
 
 ```{.zig file="src/config.zig"}
-<<copyright-comment>>
 const std = @import("std");
+const lib = @import("lib");
 const testing = std.testing;
 const meta = std.meta;
 const mem = std.mem;
+const ArrayListUnmanaged = std.ArrayListUnmanaged;
 const ComptimeStringMap = std.ComptimeStringMap;
-
-const lib = @import("lib");
 const Tokenizer = lib.Tokenizer;
-const Token = Tokenizer.Token;
+const Allocator = std.mem.Allocator;
+const Delimiter = lib.Parser.Delimiter;
+const Weaver = lib.Tree.Weaver;
 
-pub const Pair = struct {
-    key: []const u8,
-    value: []const u8,
-};
+<<configuration-specification>>
 
-<<command-line-iterator>>
+<<cli-parser>>
 
-<<configuration-iterator>>
+<<configuration-file-parser>>
+```
 
-<<configuration-booleans>>
+Command-line arguments for this program are classified into the four categories
+of `file` for file arguments, `long` for long options prefixed with a double
+dash, `short` for the single byte equivalent prefixed with a single dash,
+`pair` for long arguments that require parameters which are separated by
+`=`, and `escape`, represented by a double dash, which declares that all
+following arguments should be read as files even if they have a dash prefix.
 
-pub fn parse(comptime T: type, text: []const u8) !T {
-    const fields = meta.fields(T);
+```{.zig #cli-argument-type}
+const Arg = union(enum) {
+    pair: Pair,
+    file: []const u8,
+    long: []const u8,
+    short: u8,
+    escape,
 
-    var result: T = undefined;
-    var it = ConfigIterator{ .token = Tokenizer{ .text = text } };
-    var seen = [_]bool{false} ** fields.len;
+    pub const Pair = struct {
+        key: []const u8,
+        value: []const u8,
+    };
 
-    while (true) {
-        const pair = (try it.next()) orelse break;
-        var err: ?anyerror = null;
-
-        inline for (fields) |field, i| {
-            if (mem.eql(u8, field.name, pair.key)) {
-                if (seen[i]) return error.DuplicateKeys;
-                seen[i] = true;
-
-                const bound = switch (@typeInfo(field.field_type)) {
-                    .Bool => boolean.get(pair.value),
-                    .Int => std.fmt.parseInt(field.field_type, pair.value, 0),
-                    .Pointer => if (field.field_type == []const u8) @as(?[]const u8, pair.value) else {
-                        @compileError(@typeName(field.field_type) ++
-                           " is not allowed as a slice, only slice allowed is []const u8");
-                    },
-                    else => @compileError(@typeName(field.field_type) ++
-                        " is not implemented"),
-                };
-
-                if (bound) |value| {
-                    @field(result, field.name) = value;
-                } else err = error.ExpectedValue;
-            }
+    pub fn value(self: Arg) ?[]const u8 {
+        switch (self) {
+            .pair => |p| return p.value,
+            else => return null,
         }
     }
+};
+```
 
-    inline for (fields) |field, i| if (!seen[i]) {
-        if (field.default_value) |default| {
-            @field(result, field.name) = default;
-        } else return error.MissingValue;
-    };
+The parser for command-line arguments.
 
-    return result;
-}
+```{.zig #cli-parser}
+<<cli-argument-type>>
 
-test "parse application config spec" {
-    const Spec = struct {
-        watch: bool = false,
-        doctest: bool = false,
-        title: []const u8,
-    };
+pub fn parseCliArgs(gpa: *Allocator, out: *Configuration) !void {
+    var escaped = false;
+    var it = std.process.args();
+    gpa.free(try it.next(gpa) orelse return);
+    while (true) {
+        const slice = try it.next(gpa) orelse return;
+        errdefer gpa.free(slice);
 
-    const config =
-        \\# comment
-        \\watch = true
-        \\doctest = true
-        \\title = "example title for the file"
-    ;
+        const param = try parseCliParam(slice);
 
-    const result = try parse(Spec, config);
+        if (param == .file or escaped) {
+            try out.files.append(gpa, slice);
+        } else {
+            switch (param) {
+                .long => |l| switch (long.get(l) orelse return error.UnknownLong) {
+                    .tangle => out.tangle = !mem.startsWith(u8, "no-", l),
+                    else => unreachable,
+                },
 
-    testing.expectEqual(true, result.watch);
-    testing.expectEqual(true, result.watch);
-    testing.expectEqualStrings("example title for the file", result.title);
+                .short => |s| switch (s) {
+                    't' => out.tangle = true,
+                    else => unreachable,
+                },
+
+                .pair => |p| switch (pair.get(p.key) orelse return error.UnknownPair) {
+                    .delimiter => out.delimiter = meta.stringToEnum(
+                        Delimiter,
+                        p.value
+                    ) orelse return error.InvalidDelimiter,
+
+                    .weave => out.weave = p.value,
+
+                    .format => out.format = meta.stringToEnum(
+                        Weaver,
+                        p.value,
+                    ) orelse return error.InvalidWeaveFormat,
+
+                    else => unreachable,
+                },
+                .escape => escaped = true,
+                .file => unreachable,
+            }
+            gpa.free(slice);
+        }
+    }
 }
 ```
 
 
+
+```{.zig #cli-parser}
+fn parseCliParam(text: []const u8) !Arg {
+    var token: Tokenizer = .{ .text = text };
+
+    const line = token.next();
+    switch (line.tag) {
+        .line_fence => switch (line.len()) {
+            1 => {
+              const byte = token.next();
+              if (byte.tag != .identifier or byte.len() != 1) return error.InvalidShortParameter;
+              return Arg{ .short = byte.slice(text)[0] };
+            },
+            2 => {
+                const name = token.next();
+                if (name.tag == .eof) return Arg.escape;
+                if (name.tag != .identifier) return error.InvalidLongParameter;
+
+                const equal = token.next();
+                switch (equal.tag) {
+                    .eof => return Arg{ .long = name.slice(text) },
+
+                    .equal => {
+                        const trail = text[equal.data.end..];
+                        if (trail.len == 0) return error.InvalidLongParameterArg;
+                        return Arg{ .pair = .{
+                          .key = name.slice(text),
+                          .value = trail,
+                        } };
+                    },
+
+                    else => return error.InvalidLongParameter,
+                }
+            },
+
+            else => return error.InvalidFlagPrefix,
+        },
+
+        .eof => return error.InvalidFileName,
+
+        else => return Arg{ .file = text },
+    }
+}
+```
+
+```{.zig #cli-parser}
+test "parse cli parameter" {
+    testing.expectEqual(@as(u8, 'f'), (try parseCliParam("-f")).short);
+    testing.expectEqualStrings("watch", (try parseCliParam("--watch")).long);
+    testing.expectEqualStrings("one", (try parseCliParam("--count-thing=one")).pair.value);
+    testing.expectEqualStrings("count", (try parseCliParam("--count=one")).pair.key);
+    testing.expectEqualStrings("foo.zig", (try parseCliParam("foo.zig")).file);
+    testing.expectEqual(Arg.escape, try parseCliParam("--"));
+
+    testing.expectError(error.InvalidShortParameter, parseCliParam("- -"));
+    testing.expectError(error.InvalidLongParameter, parseCliParam("--a|b"));
+    testing.expectError(error.InvalidFlagPrefix, parseCliParam("---"));
+    testing.expectError(error.InvalidFileName, parseCliParam(""));
+    testing.expectError(error.InvalidLongParameterArg, parseCliParam("--stuff="));
+}
+```
+
+The configuration file consists of a list of command-line flags separated by
+whitespace.
+
+```{.zig #configuration-file-parser}
+pub fn parseConfigFile(gpa: *Allocator, out: *Configuration) !void {
+}
+```
