@@ -62,8 +62,15 @@ test {
 const Configuration = config.Configuration;
 
 pub fn main() !void {
-    const gpa = std.heap.page_allocator;
-    const args = <<parse-configuration-parameters>>;
+    var instance = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _= instance.deinit();
+    const gpa = &instance.allocator;
+
+    var args = <<parse-configuration-parameters>>;
+
+    defer for (args.files.items) |filename| {
+        gpa.free(filename);
+    } else args.files.deinit(gpa);
 
     var source = ArrayList(u8).init(gpa);
     defer source.deinit();
@@ -78,6 +85,7 @@ pub fn main() !void {
     var tree = try Tree.parse(gpa, source.items, .{
         .delimiter = args.delimiter,
     });
+
     defer tree.deinit(gpa);
 
     if (args.tangle) {

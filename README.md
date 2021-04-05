@@ -54,9 +54,15 @@ test {
 const Configuration = config.Configuration;
 
 pub fn main() !void {
-    const gpa = std.heap.page_allocator;
-    const args = <<parse-configuration-parameters>>;
-    std.log.debug("{}", .{args});
+    var instance = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _= instance.deinit();
+    const gpa = &instance.allocator;
+
+    var args = <<parse-configuration-parameters>>;
+
+    defer for (args.files.items) |filename| {
+        gpa.free(filename);
+    } else args.files.deinit(gpa);
 
     var source = ArrayList(u8).init(gpa);
     defer source.deinit();
@@ -71,6 +77,7 @@ pub fn main() !void {
     var tree = try Tree.parse(gpa, source.items, .{
         .delimiter = args.delimiter,
     });
+
     defer tree.deinit(gpa);
 
     if (args.tangle) {
@@ -180,10 +187,13 @@ const lib = @import("lib");
 const testing = std.testing;
 const meta = std.meta;
 const mem = std.mem;
+const fs = std.fs;
+const process = std.process;
 const ArrayListUnmanaged = std.ArrayListUnmanaged;
 const ComptimeStringMap = std.ComptimeStringMap;
 const Tokenizer = lib.Tokenizer;
 const Allocator = std.mem.Allocator;
+const ArenaAllocator = std.heap.ArenaAllocator;
 const Delimiter = lib.Parser.Delimiter;
 const Weaver = lib.Tree.Weaver;
 
@@ -260,7 +270,9 @@ pub fn parseCliArgs(gpa: *Allocator, out: *Configuration) !void {
                         p.value
                     ) orelse return error.InvalidDelimiter,
 
-                    .weave => out.weave = p.value,
+                    .weave => if (out.weave == null) {
+                      out.weave = p.value;
+                    } else return error.MultipleWeaveTargets,
 
                     .format => out.format = meta.stringToEnum(
                         Weaver,
@@ -343,11 +355,32 @@ test "parse cli parameter" {
 }
 ```
 
-The configuration file consists of a list of command-line flags separated by
-whitespace.
-
 **configuration-file-parser**
 ```zig
 pub fn parseConfigFile(gpa: *Allocator, out: *Configuration) !void {
+    var region = ArenaAllocator.init(gpa);
+    defer region.deinit();
+
+    const arena = &region.allocator;
+    var path: []const u8 = try process.getCwdAlloc(arena);
+
+    var file: fs.File = <<search-for-a-configuration-file>>;
+    defer file.close();
+
+    // TODO: parse config
 }
+```
+
+**search-for-a-configuration-file**
+```zig
+while (true) {
+    const filepath = try fs.path.join(arena, &.{path, ".zangle"});
+    break fs.cwd().openFile(filepath, .{}) catch {
+        if (fs.path.dirname(path)) |parent| {
+            path = parent;
+            continue;
+        }
+        return;
+    };
+} else unreachable
 ```
