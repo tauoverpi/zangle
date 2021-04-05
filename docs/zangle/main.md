@@ -64,7 +64,6 @@ const Configuration = config.Configuration;
 pub fn main() !void {
     const gpa = std.heap.page_allocator;
     const args = <<parse-configuration-parameters>>;
-    std.log.debug("{}", .{args});
 
     var source = ArrayList(u8).init(gpa);
     defer source.deinit();

@@ -176,12 +176,6 @@ pub fn tangle(
 
             if (filter) |f_depth| {
                 if (f_depth == depth) {
-                    const level = testing.log_level;
-                    testing.log_level = .debug;
-                    std.log.info("render hit", .{});
-                    testing.log_level = level;
-                    filter = depth;
-
                     filter = null;
                 }
             }
@@ -218,16 +212,8 @@ pub fn tangle(
             depth += 1;
 
             if (maybe_sep.tag == .fence) {
-                const level = testing.log_level;
-                testing.log_level = .debug;
-                std.log.info("builtin filter hit", .{});
-                testing.log_level = level;
                 filter = depth;
             } else if (maybe_sep.tag == .pipe) {
-                const level = testing.log_level;
-                testing.log_level = .debug;
-                std.log.info("external filter hit", .{});
-                testing.log_level = level;
                 filter = depth;
             }
 

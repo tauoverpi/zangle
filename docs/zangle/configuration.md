@@ -42,10 +42,13 @@ const lib = @import("lib");
 const testing = std.testing;
 const meta = std.meta;
 const mem = std.mem;
+const fs = std.fs;
+const process = std.process;
 const ArrayListUnmanaged = std.ArrayListUnmanaged;
 const ComptimeStringMap = std.ComptimeStringMap;
 const Tokenizer = lib.Tokenizer;
 const Allocator = std.mem.Allocator;
+const ArenaAllocator = std.heap.ArenaAllocator;
 const Delimiter = lib.Parser.Delimiter;
 const Weaver = lib.Tree.Weaver;
 
@@ -120,7 +123,9 @@ pub fn parseCliArgs(gpa: *Allocator, out: *Configuration) !void {
                         p.value
                     ) orelse return error.InvalidDelimiter,
 
-                    .weave => out.weave = p.value,
+                    .weave => if (out.weave == null) {
+                      out.weave = p.value;
+                    } else return error.MultipleWeaveTargets,
 
                     .format => out.format = meta.stringToEnum(
                         Weaver,
@@ -201,10 +206,30 @@ test "parse cli parameter" {
 }
 ```
 
-The configuration file consists of a list of command-line flags separated by
-whitespace.
-
 ```{.zig #configuration-file-parser}
 pub fn parseConfigFile(gpa: *Allocator, out: *Configuration) !void {
+    var region = ArenaAllocator.init(gpa);
+    defer region.deinit();
+
+    const arena = &region.allocator;
+    var path: []const u8 = try process.getCwdAlloc(arena);
+
+    var file: fs.File = <<search-for-a-configuration-file>>;
+    defer file.close();
+
+    // TODO: parse config
 }
+```
+
+```{.zig #search-for-a-configuration-file}
+while (true) {
+    const filepath = try fs.path.join(arena, &.{path, ".zangle"});
+    break fs.cwd().openFile(filepath, .{}) catch {
+        if (fs.path.dirname(path)) |parent| {
+            path = parent;
+            continue;
+        }
+        return;
+    };
+} else unreachable
 ```
