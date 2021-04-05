@@ -66,6 +66,14 @@ pub fn build(b: *std.build.Builder) !void {
     exe.addLibPath("lib/lib.zig");
     exe.install();
 
+    const win = b.addExecutable("zangle", "src/main.zig");
+    win.setTarget(.{ .os_tag = .windows, .cpu_arch = .x86_64 });
+    win.setBuildMode(mode);
+    win.step.dependOn(&fmt_step.step);
+    win.addPackage(pkgs.zangle);
+    win.addLibPath("lib/lib.zig");
+    win.install();
+
     const pandoc_step = try pandoc(b, &.{ "out/zangle-pretty.md", "-o", "out/manual.pdf" });
     pandoc_step.step.dependOn(&weave_pretty.step);
 
