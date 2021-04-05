@@ -38,3 +38,15 @@ jobs:
 
       - name: Run application tests
         run: zig build test
+
+      - name: Build landing page
+        run: zig build web
+
+      - name: Run zangle
+        run: zig build run -- docs/index.md --delimiter=brace
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v2.2.2
+        with:
+          name: zangle
+          path: zig-cache/bin/zangle
