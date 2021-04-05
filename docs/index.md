@@ -142,8 +142,8 @@ pub fn main() !void {
 
 ```{.css #main-block}
 .code-block {
-  margin-bottom: 8em;
-  margin-top: 8em;
+  margin-bottom: 2em;
+  margin-top: 2em;
   padding: 0em;
   width: 100vw;
   border: none;
