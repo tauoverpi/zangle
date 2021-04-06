@@ -84,7 +84,6 @@ pub fn main() !void {
     }
 
     var errors: []Parser.Error = undefined;
-    defer gpa.free(errors);
     var tree = Tree.parse(gpa, source.items, .{
         .delimiter = args.delimiter,
         .errors = &errors,
@@ -95,6 +94,7 @@ pub fn main() !void {
                 .colour = args.colour,
             }, stderr.writer());
         }
+        gpa.free(errors);
 
         if (args.debug_fail) {
             return e;

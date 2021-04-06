@@ -295,6 +295,17 @@ test "render python" {
     });
 }
 
+test "render double inline" {
+    try testTangle(
+        \\some text `one`{.txt #a} more text `two`{.txt #b}.
+        \\```{.zig file="foo.zig"}
+        \\<<a>> <<b>>
+        \\```
+    , &.{
+        \\one two
+    });
+}
+
 test "multiple outputs" {
     try testTangle(
         \\Rendering multiple inputs from the same tree

@@ -766,7 +766,7 @@ fn findStartOfBlock(p: *Parser) ?Block {
                 // not a passable codeblock, skip it and keep searching
                 p.index = block + 1;
             }
-        } else if (mem.indexOfScalarPos(Tokenizer.Token.Tag, tokens[0..block], newline, .fence)) |start| {
+        } else if (mem.lastIndexOfScalar(Tokenizer.Token.Tag, tokens[0..block], .fence)) |start| {
             // found inline block TODO: fix for `` ` ``{.zig}
 
             if (start < block) {

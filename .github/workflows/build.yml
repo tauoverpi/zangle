@@ -43,7 +43,9 @@ jobs:
         run: zig build web
 
       - name: Run zangle
-        run: zig build run -- docs/index.md --delimiter=brace
+        run: |
+          zig build run -- docs/index.md --delimiter=brace
+          zig build run
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v2.2.2
