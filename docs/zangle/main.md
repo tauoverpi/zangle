@@ -91,7 +91,9 @@ pub fn main() !void {
     }) catch |e| {
         const stderr = io.getStdErr();
         for (errors) |err| {
-            try err.describe(source.items, .{}, stderr.writer());
+            try err.describe(source.items, .{
+                .colour = args.colour,
+            }, stderr.writer());
         }
 
         if (args.debug_fail) {

@@ -143,7 +143,7 @@ pub const Error = struct {
 
             try writer.print("{s}\n", .{text[end..trail]});
             try writer.writeByteNTimes(' ', start - line_start);
-            if (config.colour) try writer.writeAll("\x1b[33m");
+            if (config.colour) try writer.writeAll("\x1b[31m");
             try writer.writeByte('^');
             try writer.writeByteNTimes('~', math.sub(usize, e.token.len(), 1) catch 0);
             if (config.colour) try writer.writeAll("\x1b[0m");

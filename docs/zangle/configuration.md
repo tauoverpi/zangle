@@ -2,10 +2,11 @@
 
 ```{.zig #configuration-specification}
 pub const Configuration = struct {
+    colour: bool = true,
     tangle: bool = true,
+    debug_fail: bool = false,
     delimiter: Delimiter = .chevron,
     weave: ?[]const u8 = null,
-    debug_fail: bool = false,
     format: Weaver = .github,
     files: ArrayListUnmanaged([]const u8) = .{},
 };
@@ -19,6 +20,10 @@ const long = ComptimeStringMap(ConfigTag, .{
   .{ "no-tangle", .tangle },
   .{ "debug-fail", .debug_fail},
   .{ "no-debug-fail", .debug_fail},
+  .{ "colour", .colour},
+  .{ "no-colour", .colour},
+  .{ "color", .colour},
+  .{ "no-color", .colour},
 });
 
 const pair = ComptimeStringMap(ConfigTag, .{
@@ -111,8 +116,9 @@ pub fn parseCliArgs(gpa: *Allocator, out: *Configuration) !void {
         } else {
             switch (param) {
                 .long => |l| switch (long.get(l) orelse return error.UnknownLong) {
-                    .tangle => out.tangle = !mem.startsWith(u8, "no-", l),
-                    .debug_fail => out.debug_fail = !mem.startsWith(u8, "no-", l),
+                    .tangle => out.tangle = !mem.eql(u8, "no-", l[0..3]),
+                    .colour => out.colour = !mem.eql(u8, "no-", l[0..3]),
+                    .debug_fail => out.debug_fail = !mem.eql(u8, "no-", l[0..3]),
                     else => unreachable,
                 },
 
