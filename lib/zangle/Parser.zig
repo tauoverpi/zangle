@@ -1,6 +1,7 @@
 const std = @import("std");
 const mem = std.mem;
 const meta = std.meta;
+const math = std.math;
 const assert = std.debug.assert;
 const testing = std.testing;
 const Allocator = std.mem.Allocator;
@@ -75,6 +76,188 @@ pub const Delimiter = enum {
     bracket,
 };
 
+pub const Error = struct {
+    code: ParseError,
+    token: Tokenizer.Token,
+
+    pub const ErrorConfig = struct {
+        colour: bool = true,
+        show_line: bool = true,
+    };
+
+    pub fn describe(
+        e: Error,
+        text: []const u8,
+        config: ErrorConfig,
+        writer: anytype,
+    ) @TypeOf(writer).Error!void {
+        var line: usize = 0;
+        var col: usize = 0;
+        var line_start: usize = 0;
+        const start = e.token.data.start;
+        const end = e.token.data.end;
+
+        for (text[0..start]) |byte, i| {
+            if (byte == '\n') {
+                line += 1;
+                col = 0;
+                line_start = i + 1;
+            } else {
+                col += 1;
+            }
+        }
+
+        try writer.print("error on line {} col {}: ", .{ line + 1, col + 1 });
+        switch (e.code) {
+            .unexpected_token => |expected| {
+                try writer.print("unexpected token `{s}'", .{@tagName(e.token.tag)});
+                if (expected) |tag| try writer.print(" expected `{s}'", .{@tagName(tag)});
+            },
+            .out_of_bounds => try writer.writeAll("unexpected end of file"),
+            .fence_not_closed => try writer.writeAll("unclosed fence"),
+            .inline_file_block => try writer.writeAll("inline blocks cannot declare files"),
+            .inline_doctest => try writer.writeAll("inline blocks cannot declare doctests"),
+            .illegal_byte_in_string => |byte| try writer.print("illegal byte `{}' found in string", .{byte}),
+            .multiple_file_targets => |m| try writer.print(
+                "block declares another target file `{s}' in addition to the existing target",
+                .{m},
+            ),
+            .empty_filename => try writer.writeAll("filenames may not be empty"),
+            .invalid_delimiter => |d| try writer.print("`{s}' is not a valid delimiter", .{d}),
+            .invalid_meta_block => try writer.writeAll("metadata block is not correctly formed"),
+        }
+
+        try writer.writeByte('\n');
+
+        if (config.show_line) {
+            try writer.writeAll(text[line_start..start]);
+            if (config.colour) try writer.writeAll("\x1b[31m");
+            try writer.writeAll(text[start..end]);
+            if (config.colour) try writer.writeAll("\x1b[0m");
+
+            var trail: usize = end;
+            for (text[end..]) |byte| {
+                if (byte == '\n' or byte == '\r') break;
+                trail += 1;
+            }
+
+            try writer.print("{s}\n", .{text[end..trail]});
+            try writer.writeByteNTimes(' ', start - line_start);
+            if (config.colour) try writer.writeAll("\x1b[33m");
+            try writer.writeByte('^');
+            try writer.writeByteNTimes('~', math.sub(usize, e.token.len(), 1) catch 0);
+            if (config.colour) try writer.writeAll("\x1b[0m");
+            try writer.writeByte('\n');
+        }
+    }
+};
+
+pub const ErrorList = ArrayListUnmanaged(Error);
+pub const ParseError = union(enum) {
+    unexpected_token: ?Tokenizer.Token.Tag,
+    out_of_bounds,
+    fence_not_closed,
+    inline_file_block,
+    inline_doctest,
+    illegal_byte_in_string: u8,
+    multiple_file_targets: []const u8,
+    empty_filename,
+    invalid_delimiter: []const u8,
+    invalid_meta_block,
+};
+
+fn testErrorString(e: Error, config: Error.ErrorConfig, text: []const u8, expected: []const u8) !void {
+    var buffer: [1024]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buffer);
+    try e.describe(text, config, fbs.writer());
+    testing.expectEqualStrings(expected, fbs.getWritten());
+}
+
+test "error display" {
+    // TODO: real test of errors on files
+    const text =
+        \\some text with an error to find on the next line
+        \\which is This one
+        \\and not here.
+        \\
+    ;
+    const err = mem.indexOf(u8, text, "This").?;
+    const token: Tokenizer.Token = .{
+        .tag = .invalid,
+        .data = .{
+            .start = err,
+            .end = err + 4,
+        },
+    };
+
+    try testErrorString(.{ .code = .{ .unexpected_token = null }, .token = token }, .{ .colour = false }, text,
+        \\error on line 2 col 10: unexpected token `invalid'
+        \\which is This one
+        \\         ^~~~
+        \\
+    );
+    try testErrorString(.{ .code = .{ .unexpected_token = .newline }, .token = token }, .{ .colour = false }, text,
+        \\error on line 2 col 10: unexpected token `invalid' expected `newline'
+        \\which is This one
+        \\         ^~~~
+        \\
+    );
+    try testErrorString(.{ .code = .out_of_bounds, .token = token }, .{ .colour = false }, text,
+        \\error on line 2 col 10: unexpected end of file
+        \\which is This one
+        \\         ^~~~
+        \\
+    );
+    try testErrorString(.{ .code = .fence_not_closed, .token = token }, .{ .colour = false }, text,
+        \\error on line 2 col 10: unclosed fence
+        \\which is This one
+        \\         ^~~~
+        \\
+    );
+    try testErrorString(.{ .code = .inline_file_block, .token = token }, .{ .colour = false }, text,
+        \\error on line 2 col 10: inline blocks cannot declare files
+        \\which is This one
+        \\         ^~~~
+        \\
+    );
+    try testErrorString(.{ .code = .inline_doctest, .token = token }, .{ .colour = false }, text,
+        \\error on line 2 col 10: inline blocks cannot declare doctests
+        \\which is This one
+        \\         ^~~~
+        \\
+    );
+    try testErrorString(.{ .code = .{ .illegal_byte_in_string = 'f' }, .token = token }, .{ .colour = false }, text,
+        \\error on line 2 col 10: illegal byte `102' found in string
+        \\which is This one
+        \\         ^~~~
+        \\
+    );
+    try testErrorString(.{ .code = .{ .multiple_file_targets = "This" }, .token = token }, .{ .colour = false }, text,
+        \\error on line 2 col 10: block declares another target file `This' in addition to the existing target
+        \\which is This one
+        \\         ^~~~
+        \\
+    );
+    try testErrorString(.{ .code = .empty_filename, .token = token }, .{ .colour = false }, text,
+        \\error on line 2 col 10: filenames may not be empty
+        \\which is This one
+        \\         ^~~~
+        \\
+    );
+    try testErrorString(.{ .code = .{ .invalid_delimiter = "This" }, .token = token }, .{ .colour = false }, text,
+        \\error on line 2 col 10: `This' is not a valid delimiter
+        \\which is This one
+        \\         ^~~~
+        \\
+    );
+    try testErrorString(.{ .code = .invalid_meta_block, .token = token }, .{ .colour = false }, text,
+        \\error on line 2 col 10: metadata block is not correctly formed
+        \\which is This one
+        \\         ^~~~
+        \\
+    );
+}
+
 /// Slice of the original markdown document.
 text: []const u8,
 
@@ -99,6 +282,8 @@ doctests: DocTestList,
 /// language or even to `none` to ignore delimiters completely.
 delimiter: Delimiter = .chevron,
 
+errors: ErrorList,
+
 pub fn init(gpa: *Allocator, text: []const u8) !Parser {
     var tokens = TokenList{};
 
@@ -121,6 +306,7 @@ pub fn init(gpa: *Allocator, text: []const u8) !Parser {
         .doctests = DocTestList{},
         .gpa = gpa,
         .roots = RootList{},
+        .errors = ErrorList{},
     };
 }
 
@@ -129,6 +315,8 @@ pub fn deinit(p: *Parser) void {
     p.nodes.deinit(p.gpa);
     p.roots.deinit(p.gpa);
     p.doctests.deinit(p.gpa);
+    var it = p.name_map.iterator();
+    while (it.next()) |entry| entry.value.trail.deinit(p.gpa);
     p.name_map.deinit(p.gpa);
     p.* = undefined;
 }
@@ -142,6 +330,10 @@ fn getToken(p: Parser, index: usize) Tokenizer.Token {
 fn expect(p: *Parser, tag: Tokenizer.Token.Tag) !void {
     defer p.index += 1;
     if (p.peek() != tag) {
+        try p.errors.append(p.gpa, .{
+            .code = .{ .unexpected_token = tag },
+            .token = p.getToken(p.index),
+        });
         return error.UnexpectedToken;
     }
 }
@@ -149,6 +341,10 @@ fn expect(p: *Parser, tag: Tokenizer.Token.Tag) !void {
 fn get(p: *Parser, tag: Tokenizer.Token.Tag) ![]const u8 {
     defer p.index += 1;
     if (p.peek() != tag) {
+        try p.errors.append(p.gpa, .{
+            .code = .{ .unexpected_token = tag },
+            .token = p.getToken(p.index),
+        });
         return error.UnexpectedToken;
     }
     const slice = p.getTokenSlice(p.index);
@@ -161,7 +357,13 @@ fn getTokenSlice(p: Parser, index: usize) []const u8 {
 }
 
 fn consume(p: *Parser) !Tokenizer.Token.Tag {
-    const token = p.peek() orelse return error.OutOfBounds;
+    const token = p.peek() orelse {
+        try p.errors.append(p.gpa, .{
+            .code = .out_of_bounds,
+            .token = p.getToken(p.index),
+        });
+        return error.OutOfBounds;
+    };
     p.index += 1;
     return token;
 }
@@ -220,6 +422,7 @@ fn addTagNames(p: *Parser, block: Node.Index) !void {
 
 fn parseFencedBlock(p: *Parser) !Node.Index {
     const tokens = p.tokens.items(.tag);
+    const fence_pos = p.index;
     const fence = p.get(.fence) catch unreachable;
 
     const reset = p.nodes.len;
@@ -237,7 +440,13 @@ fn parseFencedBlock(p: *Parser) !Node.Index {
         } else {
             p.index = found + 2;
         }
-    } else return error.FenceNotClosed;
+    } else {
+        try p.errors.append(p.gpa, .{
+            .code = .fence_not_closed,
+            .token = p.getToken(fence_pos),
+        });
+        return error.FenceNotClosed;
+    }
 
     const block_end = p.index;
 
@@ -270,7 +479,7 @@ fn parseFencedBlock(p: *Parser) !Node.Index {
         });
     }
 
-    if (info.doctest) {
+    if (info.doctest != null) {
         try p.doctests.append(p.gpa, .{ .index = this });
     }
 
@@ -295,8 +504,20 @@ fn parseInlineBlock(p: *Parser, start: usize) !Node.Index {
     errdefer p.nodes.shrinkRetainingCapacity(reset);
 
     const info = try p.parseMetaBlock();
-    if (info.filename != null) return error.InlineFileBlock;
-    if (info.doctest) return error.InlineDocTest;
+    if (info.filename) |node| {
+        try p.errors.append(p.gpa, .{
+            .code = .inline_file_block,
+            .token = p.getToken(node),
+        });
+        return error.InlineFileBlock;
+    }
+    if (info.doctest) |node| {
+        try p.errors.append(p.gpa, .{
+            .code = .inline_doctest,
+            .token = p.getToken(node),
+        });
+        return error.InlineDocTest;
+    }
 
     const this = @intCast(Node.Index, p.nodes.len);
     try p.nodes.append(p.gpa, .{
@@ -324,17 +545,24 @@ fn parseInlineBlock(p: *Parser, start: usize) !Node.Index {
 
 const Meta = struct {
     filename: ?Node.Index,
-    doctest: bool,
+    doctest: ?Node.Index,
     inline_content: bool,
 };
 
 /// Parse a string literal.
 fn parseString(p: *Parser) ![]const u8 {
-    p.expect(.string) catch unreachable;
+    try p.expect(.string);
+
     const start = p.getToken(p.index).data.start;
 
     while (true) switch (try p.consume()) {
-        .newline => return error.IllegalByteInString,
+        .newline => {
+            try p.errors.append(p.gpa, .{
+                .code = .{ .illegal_byte_in_string = '\n' },
+                .token = p.getToken(p.index - 1),
+            });
+            return error.IllegalByteInString;
+        },
         .string => return p.text[start .. p.getToken(p.index).data.start - 1],
         else => {
             // allow other tokens
@@ -348,7 +576,7 @@ fn parseMetaBlock(p: *Parser) !Meta {
     p.expect(.l_brace) catch unreachable;
     var meta_block = Meta{
         .filename = null,
-        .doctest = false,
+        .doctest = null,
         .inline_content = false,
     };
 
@@ -358,7 +586,13 @@ fn parseMetaBlock(p: *Parser) !Meta {
     switch (try p.consume()) {
         .space => {},
         .r_brace => return meta_block,
-        else => return error.UnexpectedToken,
+        else => {
+            try p.errors.append(p.gpa, .{
+                .code = .{ .unexpected_token = null },
+                .token = p.getToken(p.index - 1),
+            });
+            return error.UnexpectedToken;
+        },
     }
 
     const before = p.nodes.len;
@@ -369,7 +603,7 @@ fn parseMetaBlock(p: *Parser) !Meta {
             .dot => {
                 const key = try p.get(.identifier);
                 if (mem.eql(u8, "doctest", key)) {
-                    meta_block.doctest = true;
+                    meta_block.doctest = @intCast(Node.Index, p.index - 1);
                 } else if (mem.eql(u8, "inline", key)) {
                     meta_block.inline_content = true;
                 } else if (mem.eql(u8, "docrun", key)) {
@@ -387,12 +621,32 @@ fn parseMetaBlock(p: *Parser) !Meta {
                 const stridx = p.index;
                 const string = try p.parseString();
                 if (mem.eql(u8, "file", key)) {
-                    if (meta_block.filename != null) return error.MultipleTargets;
-                    if (string.len == 0) return error.InvalidFileName;
+                    if (meta_block.filename != null) {
+                        try p.errors.append(p.gpa, .{
+                            .code = .{ .multiple_file_targets = string },
+                            .token = p.getToken(stridx),
+                        });
+                        return error.MultipleFileTargets;
+                    }
+
+                    if (string.len == 0) {
+                        try p.errors.append(p.gpa, .{
+                            .code = .empty_filename,
+                            .token = p.getToken(stridx),
+                        });
+                        return error.EmptyFilename;
+                    }
+
                     meta_block.filename = @intCast(Node.Index, stridx);
                 } else if (mem.eql(u8, "delimiter", key)) {
-                    p.delimiter = meta.stringToEnum(Delimiter, string) orelse
+                    p.delimiter = meta.stringToEnum(Delimiter, string) orelse {
+                        try p.errors.append(p.gpa, .{
+                            .code = .{ .invalid_delimiter = string },
+                            .token = p.getToken(stridx - 2),
+                        });
+
                         return error.InvalidDelimiter;
+                    };
                 }
             },
 
@@ -407,7 +661,14 @@ fn parseMetaBlock(p: *Parser) !Meta {
 
             .space => {},
             .r_brace => break,
-            else => return error.InvalidMetaBlock,
+            else => {
+                try p.errors.append(p.gpa, .{
+                    .code = .invalid_meta_block,
+                    .token = p.getToken(p.index - 1),
+                });
+
+                return error.InvalidMetaBlock;
+            },
         }
     }
 

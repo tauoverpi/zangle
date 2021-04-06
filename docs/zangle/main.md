@@ -40,6 +40,7 @@ const log = std.log;
 const io = std.io;
 const ArrayList = std.ArrayList;
 const Tree = lib.Tree;
+const Parser = lib.Parser;
 ```
 
 The module also makes sure to reference all definitions within locally
@@ -82,9 +83,23 @@ pub fn main() !void {
         try file.reader().readAllArrayList(&source, 0xffff_ffff);
     }
 
-    var tree = try Tree.parse(gpa, source.items, .{
+    var errors: []Parser.Error = undefined;
+    defer gpa.free(errors);
+    var tree = Tree.parse(gpa, source.items, .{
         .delimiter = args.delimiter,
-    });
+        .errors = &errors,
+    }) catch |e| {
+        const stderr = io.getStdErr();
+        for (errors) |err| {
+            try err.describe(source.items, .{}, stderr.writer());
+        }
+
+        if (args.debug_fail) {
+            return e;
+        } else {
+            return;
+        }
+    };
 
     defer tree.deinit(gpa);
 

@@ -5,6 +5,7 @@ pub const Configuration = struct {
     tangle: bool = true,
     delimiter: Delimiter = .chevron,
     weave: ?[]const u8 = null,
+    debug_fail: bool = false,
     format: Weaver = .github,
     files: ArrayListUnmanaged([]const u8) = .{},
 };
@@ -16,6 +17,8 @@ const ConfigTag = meta.FieldEnum(Configuration);
 const long = ComptimeStringMap(ConfigTag, .{
   .{ "tangle", .tangle },
   .{ "no-tangle", .tangle },
+  .{ "debug-fail", .tangle },
+  .{ "no-debug-fail", .tangle },
 });
 
 const pair = ComptimeStringMap(ConfigTag, .{
@@ -109,6 +112,7 @@ pub fn parseCliArgs(gpa: *Allocator, out: *Configuration) !void {
             switch (param) {
                 .long => |l| switch (long.get(l) orelse return error.UnknownLong) {
                     .tangle => out.tangle = !mem.startsWith(u8, "no-", l),
+                    .debug_fail => out.debug_fail = !mem.startsWith(u8, "no-", l),
                     else => unreachable,
                 },
 

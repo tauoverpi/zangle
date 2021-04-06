@@ -125,7 +125,7 @@ pub fn next(self: *Tokenizer) Token {
                     fence = ch;
                 },
 
-                'a'...'z', 'A'...'Z', '_' => {
+                'a'...'z', 'A'...'Z', '0'...'9', '_' => {
                     token.tag = .identifier;
                     state = .identifier;
                 },

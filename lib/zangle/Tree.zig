@@ -30,12 +30,21 @@ doctests: []DocTest,
 
 pub const ParserOptions = struct {
     delimiter: Parser.Delimiter = .chevron,
+    errors: ?*[]Parser.Error = null,
 };
 
 pub fn parse(gpa: *Allocator, text: []const u8, options: ParserOptions) !Tree {
     var p = try Parser.init(gpa, text);
+    errdefer p.deinit();
     p.delimiter = options.delimiter;
-    try p.resolve();
+    p.resolve() catch |e| {
+        if (options.errors) |ptr| {
+            ptr.* = p.errors.toOwnedSlice(gpa);
+        } else {
+            p.errors.deinit(gpa);
+        }
+        return e;
+    };
     return Tree{
         .text = p.text,
         .tokens = p.tokens,
@@ -61,6 +70,8 @@ pub fn deinit(tree: *Tree, gpa: *Allocator) void {
     tree.tokens.deinit(gpa);
     tree.nodes.deinit(gpa);
     gpa.free(tree.roots);
+    var it = tree.name_map.iterator();
+    while (it.next()) |entry| entry.value.trail.deinit(gpa);
     tree.name_map.deinit(gpa);
 }
 
@@ -201,7 +212,9 @@ pub fn tangle(
             const token = tokens[item.node];
             const slice = tree.getTokenSlice(token);
             const maybe_sep = tree.getToken(token + 1);
-            const node = tree.name_map.get(slice) orelse return error.UnboundPlaceholder;
+            const node = tree.name_map.get(slice) orelse {
+                return error.UnboundPlaceholder;
+            };
             const start = tokens[item.last] + @intCast(Node.Index, item.offset);
             const end = tokens[item.node] - 1;
 

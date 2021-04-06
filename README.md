@@ -30,6 +30,7 @@ const log = std.log;
 const io = std.io;
 const ArrayList = std.ArrayList;
 const Tree = lib.Tree;
+const Parser = lib.Parser;
 ```
 
 The module also makes sure to reference all definitions within locally
@@ -74,9 +75,23 @@ pub fn main() !void {
         try file.reader().readAllArrayList(&source, 0xffff_ffff);
     }
 
-    var tree = try Tree.parse(gpa, source.items, .{
+    var errors: []Parser.Error = undefined;
+    defer gpa.free(errors);
+    var tree = Tree.parse(gpa, source.items, .{
         .delimiter = args.delimiter,
-    });
+        .errors = &errors,
+    }) catch |e| {
+        const stderr = io.getStdErr();
+        for (errors) |err| {
+            try err.describe(source.items, .{}, stderr.writer());
+        }
+
+        if (args.debug_fail) {
+            return e;
+        } else {
+            return;
+        }
+    };
 
     defer tree.deinit(gpa);
 
@@ -148,6 +163,7 @@ pub const Configuration = struct {
     tangle: bool = true,
     delimiter: Delimiter = .chevron,
     weave: ?[]const u8 = null,
+    debug_fail: bool = false,
     format: Weaver = .github,
     files: ArrayListUnmanaged([]const u8) = .{},
 };
@@ -160,6 +176,8 @@ const ConfigTag = meta.FieldEnum(Configuration);
 const long = ComptimeStringMap(ConfigTag, .{
   .{ "tangle", .tangle },
   .{ "no-tangle", .tangle },
+  .{ "debug-fail", .tangle },
+  .{ "no-debug-fail", .tangle },
 });
 
 const pair = ComptimeStringMap(ConfigTag, .{
@@ -256,6 +274,7 @@ pub fn parseCliArgs(gpa: *Allocator, out: *Configuration) !void {
             switch (param) {
                 .long => |l| switch (long.get(l) orelse return error.UnknownLong) {
                     .tangle => out.tangle = !mem.startsWith(u8, "no-", l),
+                    .debug_fail => out.debug_fail = !mem.startsWith(u8, "no-", l),
                     else => unreachable,
                 },
 
