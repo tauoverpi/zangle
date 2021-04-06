@@ -17,8 +17,8 @@ const ConfigTag = meta.FieldEnum(Configuration);
 const long = ComptimeStringMap(ConfigTag, .{
   .{ "tangle", .tangle },
   .{ "no-tangle", .tangle },
-  .{ "debug-fail", .tangle },
-  .{ "no-debug-fail", .tangle },
+  .{ "debug-fail", .debug_fail},
+  .{ "no-debug-fail", .debug_fail},
 });
 
 const pair = ComptimeStringMap(ConfigTag, .{
