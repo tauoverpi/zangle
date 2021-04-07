@@ -76,15 +76,17 @@ pub fn main() !void {
     }
 
     var errors: []Parser.Error = undefined;
-    defer gpa.free(errors);
     var tree = Tree.parse(gpa, source.items, .{
         .delimiter = args.delimiter,
         .errors = &errors,
     }) catch |e| {
         const stderr = io.getStdErr();
         for (errors) |err| {
-            try err.describe(source.items, .{}, stderr.writer());
+            try err.describe(source.items, .{
+                .colour = args.colour,
+            }, stderr.writer());
         }
+        gpa.free(errors);
 
         if (args.debug_fail) {
             return e;
@@ -97,12 +99,16 @@ pub fn main() !void {
 
     if (args.tangle) {
         var stack = ArrayList(Tree.RenderNode).init(gpa);
-        var scratch = ArrayList(u8).init(gpa);
+        var left= ArrayList(u8).init(gpa);
+        var right= ArrayList(u8).init(gpa);
         defer stack.deinit();
-        defer scratch.deinit();
+        defer left.deinit();
+        defer right.deinit();
 
         for (tree.roots) |root| {
             defer stack.shrinkRetainingCapacity(0);
+            defer left.shrinkRetainingCapacity(0);
+            defer right.shrinkRetainingCapacity(0);
             const filename = tree.filename(root);
             log.info("writing {s}", .{filename});
 
@@ -113,7 +119,7 @@ pub fn main() !void {
 
             var stream = io.bufferedWriter(file.writer());
 
-            try tree.tangle(&stack, &scratch, root, stream.writer());
+            try tree.tangleInternal(&stack, &left, &right, root, stream.writer());
 
             try stream.flush();
         }
@@ -160,10 +166,11 @@ zig build
 **configuration-specification**
 ```zig
 pub const Configuration = struct {
+    colour: bool = true,
     tangle: bool = true,
+    debug_fail: bool = false,
     delimiter: Delimiter = .chevron,
     weave: ?[]const u8 = null,
-    debug_fail: bool = false,
     format: Weaver = .github,
     files: ArrayListUnmanaged([]const u8) = .{},
 };
@@ -176,8 +183,12 @@ const ConfigTag = meta.FieldEnum(Configuration);
 const long = ComptimeStringMap(ConfigTag, .{
   .{ "tangle", .tangle },
   .{ "no-tangle", .tangle },
-  .{ "debug-fail", .tangle },
-  .{ "no-debug-fail", .tangle },
+  .{ "debug-fail", .debug_fail},
+  .{ "no-debug-fail", .debug_fail},
+  .{ "colour", .colour},
+  .{ "no-colour", .colour},
+  .{ "color", .colour},
+  .{ "no-color", .colour},
 });
 
 const pair = ComptimeStringMap(ConfigTag, .{
@@ -273,8 +284,9 @@ pub fn parseCliArgs(gpa: *Allocator, out: *Configuration) !void {
         } else {
             switch (param) {
                 .long => |l| switch (long.get(l) orelse return error.UnknownLong) {
-                    .tangle => out.tangle = !mem.startsWith(u8, "no-", l),
-                    .debug_fail => out.debug_fail = !mem.startsWith(u8, "no-", l),
+                    .tangle => out.tangle = !mem.eql(u8, "no-", l[0..3]),
+                    .colour => out.colour = !mem.eql(u8, "no-", l[0..3]),
+                    .debug_fail => out.debug_fail = !mem.eql(u8, "no-", l[0..3]),
                     else => unreachable,
                 },
 

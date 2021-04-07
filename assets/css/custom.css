@@ -52,15 +52,22 @@
   border: none;
   color: #eeeeee;
   background-color: #1d2021;
+}
 
+.inlinecode {
+  margin: 0.5em;
+  padding: 0.5em;
+  border: none;
+  color: #000000;
+  background-color: #f6f5ee;
+}.type-safe-header {
+  color: #664270;
+  text-align: center;
 }.filters-header {
   color: #2bb37c;
   text-align: center;
 }.bi-header {
   color: #d85229;
-  text-align: center;
-}.c-header {
-  color: #664270;
   text-align: center;
 }.tryit-header {
   color: #007bb6;

@@ -162,9 +162,88 @@ pub fn main() !void {
   border: none;
   color: {{code-normal-colour}};
   background-color: {{code-block-colour}};
+}
 
+.inlinecode {
+  margin: 0.5em;
+  padding: 0.5em;
+  border: none;
+  color: {{code-inline-colour}};
+  background-color: {{code-block-inline-colour}};
 }
 ```
+
+# Type safe
+
+```{.html #main-content}
+<h3 class="type-safe-header">Type safe (incomplete)</h3>
+<div class="container">
+  <p>{{type-error-description}}</p>
+</div>
+<div class="code-block">
+  <div class="container">
+    <pre>
+      <code class="code">
+{{type-error-code-block}}
+      </code>
+    </pre>
+  </div>
+</div>
+<div class="container">
+  <p>{{type-safe-description}}</p>
+</div>
+<div class="code-block">
+  <div class="container">
+    <pre>
+      <code class="code">
+{{type-safe-code-block}}
+      </code>
+    </pre>
+  </div>
+</div>
+```
+
+```{.css #main-block}
+.type-safe-header {
+  color: {{type-safe-colour}};
+  text-align: center;
+}
+```
+
+```{.html #type-error-description}
+<span class="zangle">Zangle</span> is type safe, all blocks within
+<span class="Zangle"> are strongly typed acording to the given language tag
+making block merges of different types a compile-time error rather than a
+documentation bug.
+```
+
+
+~~~{.html delimiter="none" #type-error-code-block}
+TODO: error message
+```{.html #example}
+&lt;pre&gt;
+  &lt;code&gt;
+    {{zig-html-test|escape html}}
+  &lt;/code&gt;
+&lt;/pre&gt;
+```
+~~~
+
+```{.html #type-safe-description}
+Merging between blocks of different types is still allowed
+with safe casts using <code class="inlinecode">from(type)</code> which ensures the specified
+type of the block matches the type specification.
+```
+
+~~~{.html delimiter="none" #type-safe-code-block}
+```{.html #example}
+&lt;pre&gt;
+  &lt;code&gt;
+    {{zig-html-test:from(zig)|escape html}}
+  &lt;/code&gt;
+&lt;/pre&gt;
+```
+~~~
 
 ## Filters
 
@@ -179,7 +258,7 @@ pub fn main() !void {
     <div class="seven columns">
       <pre>
         <code class="code">
-{{filter-zangle-code-block:escape html}}
+{{filter-zangle-code-block}}
         </code>
       </pre>
     </div>
@@ -187,7 +266,7 @@ pub fn main() !void {
     <div class="five columns">
       <pre>
         <code class="code">
-{{filter-zig-code-block:escape html}}
+{{filter-zig-code-block}}
         </code>
       </pre>
     </div>
@@ -203,6 +282,8 @@ before it's written to the document.
 
 ~~~{.txt delimiter="none" #filter-zangle-code-block}
 
+Create a page containing the code.
+
 ```{.html delimiter="brace" #html-escape-example}
 &lt;html&gt;
   &lt;head&gt;
@@ -212,7 +293,7 @@ before it's written to the document.
   &lt;body&gt;
     &lt;pre&gt;
       &lt;code&gt;
-        {{example-code-block:escape html}}
+        {{example-code-block:from(zig)|escape html}}
       &lt;/code&gt;
     &lt;/pre&gt;
   &lt;/body&gt;
@@ -222,7 +303,7 @@ before it's written to the document.
 Serve the code sample!
 
 ```{.zig #static-site-example}
-text = &lt;&lt;html-escape-example:escape python-multi-string&gt;&gt;
+text = &lt;&lt;html-escape-example:from(html)|escape python-string&gt;&gt;
 
 @app.route("/", accept=["GET"])
 def index():
@@ -231,6 +312,8 @@ def index():
 ~~~
 
 ~~~{.txt delimiter="none" #filter-zig-code-block}
+
+Declare a function for generating html.
 
 ```{.zig #example-code-block}
 &lt;&lt;imports&gt;&gt;
@@ -283,26 +366,6 @@ the document.
 ```{.css #main-block}
 .bi-header {
   color: {{bi-colour}};
-  text-align: center;
-}
-```
-
-## Usable from C and the web
-
-```{.html #main-content}
-<h3 class="c-header">Usable from C and the web (incomplete)</h3>
-<div class="container">
-  <p>{{c-description}}</p>
-</div>
-```
-
-```{.html #c-description}
-<span class="zangle">Zangle</span> is usable as a C library and WASM module.
-```
-
-```{.css #main-block}
-.c-header {
-  color: {{c-colour}};
   text-align: center;
 }
 ```
@@ -414,25 +477,25 @@ p { font-size: 1.5em; }
 
 # Colours
 
-| colour                                           |
-| --                                               |
-| `#000000`{.css #black}                           |
-| `#d85229`{.css #bright-orange #highlight #bi-colour}        |
-| `#ecf0e7`{.css #lighter-green #main-colour}      |
-| `#ccd1c8`{.css #light-green #footer-colour}      |
-| `#f6f5ee`{.css #light-yellow #intro-colour}      |
-| `#ffffff`{.css #white}                           |
-| `#555555`{.css #grey #link-colour}               |
-| `#898f93`{.css #light-grey}                      |
-| `#999999`{.css #lighter-grey}                    |
-| `#cfd2cb`{.css #lightest-grey}                   |
-| `#00a6d4`{.css #cyan}                            |
-| `#007bb6`{.css #blue #tryit-colour}              |
-| `#2bb37c`{.css #green #filters-colour}           |
-| `#5168a4`{.css #purple #logo-colour}             |
-| `#664270`{.css #magenta #c-colour}               |
-| `#1d2021`{.css #blue-grey #code-block-colour}    |
-| `#eeeeee`{.css #paper-white #code-normal-colour} |
+| colour                                                                |
+| --                                                                    |
+| `#000000`{.css #black #code-inline-colour}                            |
+| `#d85229`{.css #bright-orange #highlight #bi-colour}                  |
+| `#ecf0e7`{.css #lighter-green #main-colour}                           |
+| `#ccd1c8`{.css #light-green #footer-colour}                           |
+| `#f6f5ee`{.css #light-yellow #intro-colour #code-block-inline-colour} |
+| `#ffffff`{.css #white}                                                |
+| `#555555`{.css #grey #link-colour}                                    |
+| `#898f93`{.css #light-grey}                                           |
+| `#999999`{.css #lighter-grey}                                         |
+| `#cfd2cb`{.css #lightest-grey}                                        |
+| `#00a6d4`{.css #cyan}                                                 |
+| `#007bb6`{.css #blue #tryit-colour}                                   |
+| `#2bb37c`{.css #green #filters-colour}                                |
+| `#5168a4`{.css #purple #logo-colour}                                  |
+| `#664270`{.css #magenta #type-safe-colour}                            |
+| `#1d2021`{.css #blue-grey #code-block-colour}                         |
+| `#eeeeee`{.css #paper-white #code-normal-colour}                      |
 
 : Colours used on the site
 
