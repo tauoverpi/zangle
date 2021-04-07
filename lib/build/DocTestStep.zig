@@ -24,7 +24,7 @@ pub fn init(builder: *Builder) !*DocTestStep {
     const self = try builder.allocator.create(DocTestStep);
     self.* = DocTestStep{
         .builder = builder,
-        .step = Step.init(.WriteFile, "TangleFileStep", builder.allocator, make),
+        .step = Step.init(.WriteFile, "DocTestStep", builder.allocator, make),
         .source = ArrayList(File).init(builder.allocator),
         .output_dir = undefined,
     };
@@ -92,7 +92,7 @@ fn make(step: *Step) !void {
             var file = try fs.cwd().createFile(filename, .{ .truncate = true });
             defer file.close();
 
-            try tree.tangle(&stack, &scratch, .{ .index = root.index }, file.writer());
+            try tree.tangle(self.builder.allocator, .{ .index = root.index }, file.writer());
         }
 
         const result = try std.ChildProcess.exec(.{

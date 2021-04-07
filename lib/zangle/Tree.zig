@@ -3,6 +3,7 @@ const testing = std.testing;
 const assert = std.debug.assert;
 const mem = std.mem;
 const meta = std.meta;
+const math = std.math;
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
@@ -27,6 +28,7 @@ nodes: NodeList.Slice,
 roots: []RootIndex,
 name_map: NameMap,
 doctests: []DocTest,
+errors: ?*[]Parser.Error,
 
 pub const ParserOptions = struct {
     delimiter: Parser.Delimiter = .chevron,
@@ -52,6 +54,7 @@ pub fn parse(gpa: *Allocator, text: []const u8, options: ParserOptions) !Tree {
         .roots = p.roots.toOwnedSlice(gpa),
         .name_map = p.name_map,
         .doctests = p.doctests.toOwnedSlice(gpa),
+        .errors = options.errors,
     };
 }
 
@@ -91,16 +94,6 @@ fn renderBlock(
     }
 }
 
-pub const RenderNode = struct {
-    node: Node.Index,
-    last: usize,
-    offset: usize,
-    indent: Parser.Indent,
-    trail: []Node.Index,
-    depth: ?usize = null,
-    stack: usize = undefined,
-};
-
 fn getString(tree: Tree, node: Node.Index) []const u8 {
     const start = tree.getToken(node);
     assert(start.tag == .string);
@@ -121,32 +114,58 @@ fn getString(tree: Tree, node: Node.Index) []const u8 {
 
 pub fn filename(tree: Tree, root: RootIndex) []const u8 {
     const tokens = tree.nodes.items(.token);
-    const name = tree.getString(tokens[root.index - 1]);
+    const name = tree.getString(tokens[root.index - 2]);
     return name;
 }
 
-const Filter = enum {
-    escape,
+pub fn getTypeSlice(tree: Tree, block: Node.Index) []const u8 {
+    return tree.getTokenSlice(block - 1);
+}
+
+pub fn getTypeToken(tree: Tree, block: Node.Index) Tokenizer.Token {
+    return tree.getToken(block - 1);
+}
+
+pub fn tangle(tree: Tree, gpa: *Allocator, root: RootIndex, writer: anytype) !void {
+    var stack = ArrayList(RenderNode).init(gpa);
+    defer stack.deinit();
+
+    var left = ArrayList(u8).init(gpa);
+    defer left.deinit();
+
+    var right = ArrayList(u8).init(gpa);
+    defer right.deinit();
+
+    try tree.tangleInternal(&stack, &left, &right, root, writer);
+}
+
+const FilterItem = union(enum) {
+    none,
+    filter: Filter,
+
+    pub const Direction = enum { left, right };
+
+    pub const Filter = struct {
+        direction: Direction,
+        node: Node.Index,
+        index: usize,
+    };
 };
 
-const builtin_filters = std.ComptimeStringMap(Filter, .{
-    .{ "escape", .escape },
-});
-
-const EscapeFilter = enum {
-    html,
-    zig_string,
+pub const RenderNode = struct {
+    node: Node.Index,
+    last: usize,
+    offset: usize,
+    indent: Parser.Indent,
+    trail: []Node.Index,
+    filter: FilterItem = .none,
 };
 
-const escape_filter_mode = std.ComptimeStringMap(EscapeFilter, .{
-    .{ "html", .html },
-    .{ "zig-string", .zig_string },
-});
-
-pub fn tangle(
+pub fn tangleInternal(
     tree: Tree,
     stack: *ArrayList(RenderNode),
-    scratch: *ArrayList(u8),
+    left: *ArrayList(u8),
+    right: *ArrayList(u8),
     root: RootIndex,
     writer: anytype,
 ) !void {
@@ -156,19 +175,22 @@ pub fn tangle(
     const starts = tree.tokens.items(.start);
     const data = tree.nodes.items(.data);
 
-    scratch.shrinkRetainingCapacity(0);
-
+    left.shrinkRetainingCapacity(0);
+    right.shrinkRetainingCapacity(0);
+    var lindex: usize = 0;
+    var rindex: usize = 0;
+    var direction: ?FilterItem.Direction = null;
     try stack.append(.{
         .node = root.index + 1,
         .last = root.index,
         .offset = 0,
         .indent = 0,
         .trail = &.{},
+        .filter = .none,
     });
 
-    var depth: usize = 1;
-    var filter: ?usize = null;
     var indent: Parser.Indent = 0;
+    testing.log_level = .debug;
 
     while (stack.items.len > 0) {
         var index = stack.items.len - 1;
@@ -181,25 +203,18 @@ pub fn tangle(
             const start = tokens[item.last] + @intCast(Node.Index, item.offset);
             const end = tokens[item.node];
             // check if block is empty
-            if (start < end) try tree.renderBlock(start, end, item.indent, writer);
+            try tree.renderBlock(start, end, indent, writer);
 
             _ = stack.pop();
 
-            if (filter) |f_depth| {
-                if (f_depth == depth) {
-                    filter = null;
-                }
-            }
-
-            depth -= 1;
+            if (item.trail.len == 0) indent = math.sub(Parser.Indent, indent, item.indent) catch 0;
 
             for (item.trail) |_, i| {
-                depth += 1;
                 const trail = item.trail[(item.trail.len - 1) - i];
                 try stack.append(.{
                     .node = trail + 1,
                     .last = trail,
-                    .indent = item.indent,
+                    .indent = if (i == item.trail.len - 1) item.indent else 0,
                     .offset = 0,
                     .trail = &.{},
                 });
@@ -218,29 +233,23 @@ pub fn tangle(
             const start = tokens[item.last] + @intCast(Node.Index, item.offset);
             const end = tokens[item.node] - 1;
 
-            try tree.renderBlock(start, end, item.indent, writer);
+            try tree.renderBlock(start, end, indent, writer);
 
             for (stack.items) |prev| if (prev.node == node.head) return error.CycleDetected;
 
-            depth += 1;
+            var filter: FilterItem = .none;
 
-            if (maybe_sep.tag == .fence) {
-                filter = depth;
-            } else if (maybe_sep.tag == .pipe) {
-                filter = depth;
-            }
-
+            indent += data[item.node];
             try stack.append(.{
                 .node = node.head + 1,
                 .last = node.head,
                 .offset = 0,
                 .indent = data[item.node],
                 .trail = node.trail.items,
+                .filter = filter,
             });
         }
     }
-
-    assert(depth == 0);
 }
 
 fn testTangle(input: []const u8, expected: []const []const u8) !void {
@@ -252,17 +261,9 @@ fn testTangle(input: []const u8, expected: []const []const u8) !void {
     var stream = ArrayList(u8).init(allocator);
     defer stream.deinit();
 
-    var stack = ArrayList(Tree.RenderNode).init(allocator);
-    defer stack.deinit();
-
-    var scratch = ArrayList(u8).init(allocator);
-    defer scratch.deinit();
-
     for (expected) |expect, i| {
         defer stream.shrinkRetainingCapacity(0);
-
-        try tree.tangle(&stack, &scratch, tree.roots[i], stream.writer());
-
+        try tree.tangle(allocator, tree.roots[i], stream.writer());
         testing.expectEqualStrings(expect, stream.items);
     }
 }
@@ -303,6 +304,21 @@ test "render double inline" {
         \\```
     , &.{
         \\one two
+    });
+}
+
+test "render ignore type signature" {
+    if (true) return error.SkipZigTest;
+    try testTangle(
+        \\```{.zig #a}
+        \\a
+        \\```
+        \\
+        \\```{.zig file="thing.zig"}
+        \\<<a:zig>>
+        \\```
+    , &.{
+        \\a
     });
 }
 
@@ -397,7 +413,7 @@ pub fn weaveGithub(tree: Tree, writer: anytype) !void {
                             try writer.writeAll(slice);
 
                             while (j <= i) : (j += 1) switch (tags[i - j]) {
-                                .filename => {},
+                                .type, .filename => {},
                                 .tag => try writer.print("**{s}**\n", .{tree.getTokenSlice(tokens[i - j])}),
                                 else => break,
                             };
@@ -507,7 +523,7 @@ pub fn weavePandoc(tree: Tree, writer: anytype) !void {
                     try writer.writeAll(slice);
 
                     while (j <= i) : (j += 1) switch (tags[i - j]) {
-                        .filename => {},
+                        .type, .filename => {},
                         .tag => try writer.print("**{s}**\n", .{tree.getTokenSlice(tokens[i - j])}),
                         else => break,
                     };

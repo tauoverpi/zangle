@@ -107,12 +107,16 @@ pub fn main() !void {
 
     if (args.tangle) {
         var stack = ArrayList(Tree.RenderNode).init(gpa);
-        var scratch = ArrayList(u8).init(gpa);
+        var left= ArrayList(u8).init(gpa);
+        var right= ArrayList(u8).init(gpa);
         defer stack.deinit();
-        defer scratch.deinit();
+        defer left.deinit();
+        defer right.deinit();
 
         for (tree.roots) |root| {
             defer stack.shrinkRetainingCapacity(0);
+            defer left.shrinkRetainingCapacity(0);
+            defer right.shrinkRetainingCapacity(0);
             const filename = tree.filename(root);
             log.info("writing {s}", .{filename});
 
@@ -123,7 +127,7 @@ pub fn main() !void {
 
             var stream = io.bufferedWriter(file.writer());
 
-            try tree.tangle(&stack, &scratch, root, stream.writer());
+            try tree.tangleInternal(&stack, &left, &right, root, stream.writer());
 
             try stream.flush();
         }

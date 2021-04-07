@@ -6,6 +6,7 @@ const assert = std.debug.assert;
 const testing = std.testing;
 const Allocator = std.mem.Allocator;
 const ArrayListUnmanaged = std.ArrayListUnmanaged;
+const ComptimeStringMap = std.ComptimeStringMap;
 
 const Tokenizer = @import("Tokenizer.zig");
 
@@ -40,6 +41,7 @@ pub const Node = struct {
     pub const Tag = enum(u8) {
         tag,
         filename,
+        type,
         block,
         placeholder,
         end,
@@ -77,7 +79,7 @@ pub const Delimiter = enum {
 };
 
 pub const Error = struct {
-    code: ParseError,
+    code: SyntaxError,
     token: Tokenizer.Token,
 
     pub const ErrorConfig = struct {
@@ -125,6 +127,7 @@ pub const Error = struct {
             .empty_filename => try writer.writeAll("filenames may not be empty"),
             .invalid_delimiter => |d| try writer.print("`{s}' is not a valid delimiter", .{d}),
             .invalid_meta_block => try writer.writeAll("metadata block is not correctly formed"),
+            .unknown_filter => |s| try writer.print("`{s}' is not a known filter type", .{s}),
         }
 
         try writer.writeByte('\n');
@@ -153,7 +156,7 @@ pub const Error = struct {
 };
 
 pub const ErrorList = ArrayListUnmanaged(Error);
-pub const ParseError = union(enum) {
+pub const SyntaxError = union(enum) {
     unexpected_token: ?Tokenizer.Token.Tag,
     out_of_bounds,
     fence_not_closed,
@@ -164,6 +167,7 @@ pub const ParseError = union(enum) {
     empty_filename,
     invalid_delimiter: []const u8,
     invalid_meta_block,
+    unknown_filter,
 };
 
 fn testErrorString(e: Error, config: Error.ErrorConfig, text: []const u8, expected: []const u8) !void {
@@ -397,7 +401,7 @@ fn addTagNames(p: *Parser, block: Node.Index) !void {
         var i = block - 1;
         while (true) : (i -= 1) {
             switch (tags[i]) {
-                .filename => {},
+                .type, .filename => {},
                 .tag => {
                     const name = p.getTokenSlice(tokens[i]);
                     const result = try p.name_map.getOrPut(p.gpa, name);
@@ -458,8 +462,17 @@ fn parseFencedBlock(p: *Parser) !Node.Index {
             .token = file,
             .data = undefined,
         });
+
+        try p.nodes.append(p.gpa, .{
+            .tag = .type,
+            .token = info.type,
+            .data = undefined,
+        });
+
         try p.roots.append(p.gpa, .{ .index = @intCast(Node.Index, p.nodes.len) });
+
         this = @intCast(Node.Index, p.nodes.len);
+
         try p.nodes.append(p.gpa, .{
             .tag = .block,
             .token = @intCast(Node.Index, block_start),
@@ -469,7 +482,14 @@ fn parseFencedBlock(p: *Parser) !Node.Index {
             }).int(),
         });
     } else {
+        try p.nodes.append(p.gpa, .{
+            .tag = .type,
+            .token = info.type,
+            .data = undefined,
+        });
+
         this = @intCast(Node.Index, p.nodes.len);
+
         try p.nodes.append(p.gpa, .{
             .tag = .block,
             .token = @intCast(Node.Index, block_start),
@@ -504,20 +524,32 @@ fn parseInlineBlock(p: *Parser, start: usize) !Node.Index {
     errdefer p.nodes.shrinkRetainingCapacity(reset);
 
     const info = try p.parseMetaBlock();
+
+    var err = false;
+
     if (info.filename) |node| {
         try p.errors.append(p.gpa, .{
             .code = .inline_file_block,
             .token = p.getToken(node),
         });
-        return error.InlineFileBlock;
+        err = true;
     }
+
     if (info.doctest) |node| {
         try p.errors.append(p.gpa, .{
             .code = .inline_doctest,
             .token = p.getToken(node),
         });
-        return error.InlineDocTest;
+        err = true;
     }
+
+    if (err) return error.InvalidInlineBlock;
+
+    try p.nodes.append(p.gpa, .{
+        .tag = .type,
+        .token = info.type,
+        .data = undefined,
+    });
 
     const this = @intCast(Node.Index, p.nodes.len);
     try p.nodes.append(p.gpa, .{
@@ -543,12 +575,6 @@ fn parseInlineBlock(p: *Parser, start: usize) !Node.Index {
     return this;
 }
 
-const Meta = struct {
-    filename: ?Node.Index,
-    doctest: ?Node.Index,
-    inline_content: bool,
-};
-
 /// Parse a string literal.
 fn parseString(p: *Parser) ![]const u8 {
     try p.expect(.string);
@@ -570,18 +596,27 @@ fn parseString(p: *Parser) ![]const u8 {
     };
 }
 
+const Meta = struct {
+    filename: ?Node.Index,
+    doctest: ?Node.Index,
+    inline_content: bool,
+    type: Node.Index,
+};
+
 /// Parse the meta data block which follows a fence and
 /// allocate nodes for each tag found.
 fn parseMetaBlock(p: *Parser) !Meta {
     p.expect(.l_brace) catch unreachable;
+
+    try p.expect(.dot);
+    try p.expect(.identifier);
+
     var meta_block = Meta{
         .filename = null,
         .doctest = null,
+        .type = @intCast(Node.Index, p.index - 1),
         .inline_content = false,
     };
-
-    try p.expect(.dot);
-    const language = try p.get(.identifier);
 
     switch (try p.consume()) {
         .space => {},
@@ -675,6 +710,68 @@ fn parseMetaBlock(p: *Parser) !Meta {
     return meta_block;
 }
 
+const Filter = enum { shell, escape };
+const EscapeFilter = enum { zig_string, python_string, html };
+
+const builtin_filters = ComptimeStringMap(Filter, .{
+    .{ "shell", .shell },
+    .{ "escape", .escape },
+});
+
+const escape_filters = ComptimeStringMap(EscapeFilter, .{
+    .{ "zig-string", .zig_string },
+    .{ "python-string", .python_string },
+    .{ "html", .html },
+});
+
+fn parseFilter(p: *Parser) !void {
+    const filter = builtin_filters.get(try p.get(.identifier)) orelse {
+        return error.UnknownFilter;
+    };
+
+    switch (filter) {
+        .escape, .shell => |tag| {
+            const space = try p.get(.space);
+            const option = try p.get(.identifier);
+            switch (tag) {
+                .escape => _ = escape_filters.get(option) orelse {
+                    try p.errors.append(p.gpa, .{
+                        .code = .unknown_filter,
+                        .token = p.getToken(p.index - 1),
+                    });
+                    return error.UnknownEscapeFilter;
+                },
+                .shell => {},
+            }
+        },
+    }
+}
+
+fn parseTypeSignature(p: *Parser) !void {
+    const explicit_type = try p.consume();
+    if (explicit_type != .identifier) {
+        try p.errors.append(p.gpa, .{
+            .code = .{ .unexpected_token = .identifier },
+            .token = p.getToken(p.index - 1),
+        });
+        return error.InvalidTypeSignature;
+    }
+
+    if (!mem.eql(u8, "from", p.getTokenSlice(p.index - 1))) return;
+
+    if ((try p.consume()) != .l_paren) {
+        try p.errors.append(p.gpa, .{
+            .code = .{ .unexpected_token = .l_paren },
+            .token = p.getToken(p.index - 1),
+        });
+        return error.InvalidTypeSignature;
+    }
+
+    const cast_type = try p.get(.identifier);
+
+    try p.expect(.r_paren);
+}
+
 fn parsePlaceholders(p: *Parser, start: usize, end: usize, block: bool) !void {
     const tokens = p.tokens.items(.tag);
     const starts = p.tokens.items(.start);
@@ -683,35 +780,35 @@ fn parsePlaceholders(p: *Parser, start: usize, end: usize, block: bool) !void {
     while (mem.indexOfPos(Tokenizer.Token.Tag, tokens[0..end], p.index, &.{.l_chevron})) |found| {
         p.index = found + 1;
         const chevron = p.index - 1;
-        const name = p.get(.identifier) catch continue;
-        const chev = blk: {
-            //p.get(.r_chevron) catch continue;
-            switch (try p.consume()) {
-                .r_chevron => break :blk p.getTokenSlice(p.index - 1),
-                .pipe => while (true) {
-                    if ((try p.consume()) == .r_chevron) {
-                        break :blk p.getTokenSlice(p.index - 1);
-                    }
-                } else continue,
-                .fence => {
-                    const fence = p.getTokenSlice(p.index - 1);
-                    if (fence.len == 1 and fence[0] == ':') {
-                        while (true) if ((try p.consume()) == .r_chevron) {
-                            break :blk p.getTokenSlice(p.index - 1);
-                        };
-                    }
-                    continue;
-                },
-                else => continue,
-            }
-        };
+        const chev = p.getTokenSlice(chevron);
 
         switch (p.delimiter) {
             .none => continue,
-            .chevron => if (!mem.eql(u8, ">>", chev)) continue,
-            .brace => if (!mem.eql(u8, "}}", chev)) continue,
-            .paren => if (!mem.eql(u8, "))", chev)) continue,
-            .bracket => if (!mem.eql(u8, "]]", chev)) continue,
+            .chevron => if (!mem.eql(u8, "<<", chev)) continue,
+            .brace => if (!mem.eql(u8, "{{", chev)) continue,
+            .paren => if (!mem.eql(u8, "((", chev)) continue,
+            .bracket => if (!mem.eql(u8, "[[", chev)) continue,
+        }
+
+        const name = p.get(.identifier) catch continue;
+
+        switch (try p.consume()) {
+            .r_chevron => {},
+            .pipe => try p.parseFilter(),
+            .fence => {
+                const fence = p.getTokenSlice(p.index - 1);
+                if (fence.len == 1 and fence[0] == ':') {
+                    try p.parseTypeSignature();
+
+                    const pipe = p.peek();
+                    if (pipe != null and pipe.? == .pipe) {
+                        p.expect(.pipe) catch unreachable;
+                        try p.parseFilter();
+                    }
+                    try p.expect(.r_chevron);
+                } else continue;
+            },
+            else => continue,
         }
 
         var indent: usize = 0;
@@ -767,8 +864,6 @@ fn findStartOfBlock(p: *Parser) ?Block {
                 p.index = block + 1;
             }
         } else if (mem.lastIndexOfScalar(Tokenizer.Token.Tag, tokens[0..block], .fence)) |start| {
-            // found inline block TODO: fix for `` ` ``{.zig}
-
             if (start < block) {
                 // by the time we've verified the current block to be inline we've also
                 // found the start of the block thus we return the start to avoid
@@ -777,7 +872,7 @@ fn findStartOfBlock(p: *Parser) ?Block {
                 return Block{ .inline_block = start + 2 };
             } else {
                 // not a passable codeblock, skip it and keep searching
-                p.index = block + 1;
+                p.index = block - 1;
             }
         }
     } else return null;
@@ -827,10 +922,10 @@ test "parse simple" {
     testing.expectEqual(root.index, p.name_map.get("and-can-have-tags").?.head);
     testing.expectEqual(Tokenizer.Token.Tag.l_chevron, tags[node_tokens[root.index + 1] - 1]);
     testing.expectEqual(Tokenizer.Token.Tag.l_chevron, tags[node_tokens[root.index + 2] - 1]);
-    testing.expectEqual(root.index + 5, p.name_map.get("that").?.head);
+    testing.expectEqual(root.index + 6, p.name_map.get("that").?.head);
 }
 
-test "fences" {
+test "parse fences" {
     try testParse(
         \\```{.zig file="render.zig"}
         \\```
@@ -844,6 +939,44 @@ test "fences" {
         \\
         \\```{.zig file="parse.zig"}
         \\const <<tree-type>> = struct {};
+        \\```
+    );
+}
+
+test "parse placeholders" {
+    try testParse(
+        \\```{.zig #a}
+        \\<<a>>
+        \\```
+    );
+
+    try testParse(
+        \\```{.zig #a}
+        \\<<a:a>>
+        \\```
+    );
+
+    try testParse(
+        \\```{.zig #a}
+        \\<<a|escape zig-string>>
+        \\```
+    );
+
+    try testParse(
+        \\```{.zig #a}
+        \\<<a:a|escape zig-string>>
+        \\```
+    );
+
+    try testParse(
+        \\```{.zig #a}
+        \\<<a:from(a)>>
+        \\```
+    );
+
+    try testParse(
+        \\```{.zig #a}
+        \\<<a:from(a)|escape zig-string>>
         \\```
     );
 }

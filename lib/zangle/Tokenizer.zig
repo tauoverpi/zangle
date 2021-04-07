@@ -37,6 +37,8 @@ pub const Token = struct {
         line_fence,
         l_brace,
         r_brace,
+        l_paren,
+        r_paren,
         pipe,
         dot,
         identifier,
@@ -161,6 +163,9 @@ pub fn next(self: *Tokenizer) Token {
                 // All valid start characters that this must break on
                 '|',
                 '(',
+                ')',
+                '[',
+                ']',
                 '.',
                 '#',
                 '=',
@@ -205,6 +210,16 @@ pub fn next(self: *Tokenizer) Token {
 
                     '}' => {
                         token.tag = .r_brace;
+                        break;
+                    },
+
+                    '(' => {
+                        token.tag = .l_paren;
+                        break;
+                    },
+
+                    ')' => {
+                        token.tag = .r_paren;
                         break;
                     },
 

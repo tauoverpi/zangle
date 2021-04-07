@@ -26,7 +26,7 @@ pub fn init(builder: *Builder, weaver: Weaver, filename: []const u8) !*WeaveStep
     const self = try builder.allocator.create(WeaveStep);
     self.* = WeaveStep{
         .builder = builder,
-        .step = Step.init(.WriteFile, "TangleFileStep", builder.allocator, make),
+        .step = Step.init(.WriteFile, "WeaveStep", builder.allocator, make),
         .source = ArrayList(File).init(builder.allocator),
         .output_filename = filename,
         .weaver = weaver,
