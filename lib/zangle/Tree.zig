@@ -78,6 +78,22 @@ pub fn deinit(tree: *Tree, gpa: *Allocator) void {
     tree.name_map.deinit(gpa);
 }
 
+pub fn typeCheck(tree: *Tree, gpa: *Allocator) !void {
+    const tags = tree.nodes.items(.tag);
+    const tokens = tree.nodes.items(.token);
+    var block_type: []const u8 = undefined;
+    var err = false;
+    for (tags) |tag, i| switch (tag) {
+        .type => block_type = tree.getTokenSlice(tokens[i]),
+        .placeholder => {
+            const placeholder = tree.getTokenSlice(tokens[i]);
+            const node_type = tree.getTokenSlice(tokens[i - 1]);
+            if (tree.getToken(tokens[i] + 1).tag == .colon) {}
+        },
+        else => {},
+    };
+}
+
 fn renderBlock(
     tree: Tree,
     start: Node.Index,
@@ -94,36 +110,37 @@ fn renderBlock(
     }
 }
 
-fn getString(tree: Tree, node: Node.Index) []const u8 {
+fn getFilename(tree: Tree, node: Node.Index) []const u8 {
     const start = tree.getToken(node);
-    assert(start.tag == .string);
 
     var tokenizer: Tokenizer = .{
         .text = tree.text,
         .index = start.data.end,
     };
 
-    while (true) switch (tokenizer.next().tag) {
-        .string => return tree.text[start.data.end .. tokenizer.index - 1],
-        else => |token| {
-            assert(token != .newline);
-            assert(token != .eof);
-        },
-    };
+    if (start.tag == .string) {
+        while (true) switch (tokenizer.next().tag) {
+            .string => return tree.text[start.data.end .. tokenizer.index - 1],
+            else => |token| {
+                assert(token != .newline);
+                assert(token != .eof);
+            },
+        };
+    } else {
+        while (true) switch (tokenizer.next().tag) {
+            .space, .r_brace => return tree.text[start.data.start .. tokenizer.index - 1],
+            else => |token| {
+                assert(token != .newline);
+                assert(token != .eof);
+            },
+        };
+    }
 }
 
 pub fn filename(tree: Tree, root: RootIndex) []const u8 {
     const tokens = tree.nodes.items(.token);
-    const name = tree.getString(tokens[root.index - 2]);
+    const name = tree.getFilename(tokens[root.index - 2]);
     return name;
-}
-
-pub fn getTypeSlice(tree: Tree, block: Node.Index) []const u8 {
-    return tree.getTokenSlice(block - 1);
-}
-
-pub fn getTypeToken(tree: Tree, block: Node.Index) Tokenizer.Token {
-    return tree.getToken(block - 1);
 }
 
 pub fn tangle(tree: Tree, gpa: *Allocator, root: RootIndex, writer: anytype) !void {
@@ -252,7 +269,7 @@ pub fn tangleInternal(
     }
 }
 
-fn testTangle(input: []const u8, expected: []const []const u8) !void {
+fn testTangle(input: []const u8, expected: anytype) !void {
     const allocator = std.testing.allocator;
 
     var tree = try Tree.parse(allocator, input, .{});
@@ -261,10 +278,13 @@ fn testTangle(input: []const u8, expected: []const []const u8) !void {
     var stream = ArrayList(u8).init(allocator);
     defer stream.deinit();
 
-    for (expected) |expect, i| {
+    testing.log_level = .debug;
+    inline for (meta.fields(@TypeOf(expected))) |field, i| {
+        const expect = @field(expected, field.name);
         defer stream.shrinkRetainingCapacity(0);
         try tree.tangle(allocator, tree.roots[i], stream.writer());
         testing.expectEqualStrings(expect, stream.items);
+        testing.expectEqualStrings(field.name, tree.filename(tree.roots[i]));
     }
 }
 
@@ -287,12 +307,12 @@ test "render python" {
         \\<<comment>>
         \\return answer
         \\```
-    , &.{
-        \\def universe(question):
-        \\    answer = 42 # comment
-        \\    # then return the truth
-        \\    # then return the truth
-        \\    return answer
+    , .{ .@"example.zig" = 
+    \\def universe(question):
+    \\    answer = 42 # comment
+    \\    # then return the truth
+    \\    # then return the truth
+    \\    return answer
     });
 }
 
@@ -302,8 +322,8 @@ test "render double inline" {
         \\```{.zig file="foo.zig"}
         \\<<a>> <<b>>
         \\```
-    , &.{
-        \\one two
+    , .{ .@"foo.zig" = 
+    \\one two
     });
 }
 
@@ -317,8 +337,18 @@ test "render ignore type signature" {
         \\```{.zig file="thing.zig"}
         \\<<a:zig>>
         \\```
-    , &.{
+    , .{ .@"thing.zig" = 
+    \\a
+    });
+}
+
+test "render bare filename" {
+    try testTangle(
+        \\```{.zig file=a.zig}
         \\a
+        \\```
+    , .{ .@"a.zig" = 
+    \\a
     });
 }
 
@@ -337,10 +367,12 @@ test "multiple outputs" {
         \\const <<tree-type>> = struct {};
         \\```
         \\
-    , &.{
+    , .{
+        .@"render.zig" = 
         \\const Tree = struct {};
         \\// A
         ,
+        .@"parse.zig" = 
         \\const Tree = struct {};
     });
 }

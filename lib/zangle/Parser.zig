@@ -168,6 +168,9 @@ pub const SyntaxError = union(enum) {
     invalid_delimiter: []const u8,
     invalid_meta_block,
     unknown_filter,
+
+    // render
+
 };
 
 fn testErrorString(e: Error, config: Error.ErrorConfig, text: []const u8, expected: []const u8) !void {
@@ -577,8 +580,6 @@ fn parseInlineBlock(p: *Parser, start: usize) !Node.Index {
 
 /// Parse a string literal.
 fn parseString(p: *Parser) ![]const u8 {
-    try p.expect(.string);
-
     const start = p.getToken(p.index).data.start;
 
     while (true) switch (try p.consume()) {
@@ -594,6 +595,41 @@ fn parseString(p: *Parser) ![]const u8 {
             // allow other tokens
         },
     };
+}
+
+fn parseFilename(p: *Parser) ![]const u8 {
+    switch (try p.consume()) {
+        .string => return try p.parseString(),
+        .identifier, .forward_slash, .backward_slash => {
+            const start = p.getToken(p.index - 1);
+            while (true) {
+                const next = p.peek() orelse return error.UnexpectedEof;
+                switch (next) {
+                    .newline => {
+                        _ = p.consume() catch unreachable;
+                        try p.errors.append(p.gpa, .{
+                            .code = .{ .illegal_byte_in_string = '\n' },
+                            .token = p.getToken(p.index),
+                        });
+                        return error.IllegalByteInString;
+                    },
+                    .space => {
+                        _ = p.consume() catch unreachable;
+                        const end = p.getToken(p.index);
+                        return p.text[start.data.start..end.data.start];
+                    },
+                    .r_brace => {
+                        const end = p.getToken(p.index);
+                        return p.text[start.data.start..end.data.start];
+                    },
+                    else => _ = try p.consume(),
+                }
+            }
+        },
+        else => {
+            return error.InvalidFilename;
+        },
+    }
 }
 
 const Meta = struct {
@@ -643,8 +679,6 @@ fn parseMetaBlock(p: *Parser) !Meta {
                     meta_block.inline_content = true;
                 } else if (mem.eql(u8, "docrun", key)) {
                     // TODO
-                } else if (mem.eql(u8, "actor", key)) {
-                    // TODO
                 } else {
                     // Ignore it, it's probably for pandoc or another filter
                 }
@@ -654,7 +688,7 @@ fn parseMetaBlock(p: *Parser) !Meta {
                 const key = p.getTokenSlice(p.index - 1);
                 try p.expect(.equal);
                 const stridx = p.index;
-                const string = try p.parseString();
+                const string = try p.parseFilename();
                 if (mem.eql(u8, "file", key)) {
                     if (meta_block.filename != null) {
                         try p.errors.append(p.gpa, .{
@@ -977,6 +1011,18 @@ test "parse placeholders" {
     try testParse(
         \\```{.zig #a}
         \\<<a:from(a)|escape zig-string>>
+        \\```
+    );
+}
+
+test "parse files" {
+    try testParse(
+        \\```{.zig file="a.zig"}
+        \\```
+    );
+
+    try testParse(
+        \\```{.zig file=a.zig}
         \\```
     );
 }

@@ -45,6 +45,8 @@ pub const Token = struct {
         equal,
         string,
         hash,
+        forward_slash,
+        backward_slash,
         l_chevron,
         r_chevron,
     };
@@ -87,6 +89,18 @@ pub fn next(self: *Tokenizer) Token {
 
                 '#' => {
                     token.tag = .hash;
+                    self.index += 1;
+                    break;
+                },
+
+                '/' => {
+                    token.tag = .forward_slash;
+                    self.index += 1;
+                    break;
+                },
+
+                '\\' => {
+                    token.tag = .backward_slash;
                     self.index += 1;
                     break;
                 },
