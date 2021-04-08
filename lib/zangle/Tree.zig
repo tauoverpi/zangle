@@ -37,7 +37,6 @@ pub const ParserOptions = struct {
 
 pub fn parse(gpa: *Allocator, text: []const u8, options: ParserOptions) !Tree {
     var p = try Parser.init(gpa, text);
-    errdefer p.deinit();
     p.delimiter = options.delimiter;
     p.resolve() catch |e| {
         if (options.errors) |ptr| {
@@ -45,6 +44,8 @@ pub fn parse(gpa: *Allocator, text: []const u8, options: ParserOptions) !Tree {
         } else {
             p.errors.deinit(gpa);
         }
+
+        p.deinit();
         return e;
     };
     var self = Tree{
@@ -55,6 +56,7 @@ pub fn parse(gpa: *Allocator, text: []const u8, options: ParserOptions) !Tree {
         .name_map = p.name_map,
         .doctests = p.doctests.toOwnedSlice(gpa),
     };
+    errdefer self.deinit(gpa);
     try typeCheck(self, gpa, options.errors);
     return self;
 }
