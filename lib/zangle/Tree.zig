@@ -6,6 +6,7 @@ const meta = std.meta;
 const math = std.math;
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
+const ArrayListUnmanaged = std.ArrayListUnmanaged;
 
 const Tokenizer = @import("Tokenizer.zig");
 const Token = Tokenizer.Token;
@@ -28,7 +29,6 @@ nodes: NodeList.Slice,
 roots: []RootIndex,
 name_map: NameMap,
 doctests: []DocTest,
-errors: ?*[]Parser.Error,
 
 pub const ParserOptions = struct {
     delimiter: Parser.Delimiter = .chevron,
@@ -47,15 +47,16 @@ pub fn parse(gpa: *Allocator, text: []const u8, options: ParserOptions) !Tree {
         }
         return e;
     };
-    return Tree{
+    var self = Tree{
         .text = p.text,
         .tokens = p.tokens,
         .nodes = p.nodes.toOwnedSlice(),
         .roots = p.roots.toOwnedSlice(gpa),
         .name_map = p.name_map,
         .doctests = p.doctests.toOwnedSlice(gpa),
-        .errors = options.errors,
     };
+    try typeCheck(self, gpa, options.errors);
+    return self;
 }
 
 fn getToken(tree: Tree, index: usize) Token {
@@ -78,20 +79,66 @@ pub fn deinit(tree: *Tree, gpa: *Allocator) void {
     tree.name_map.deinit(gpa);
 }
 
-pub fn typeCheck(tree: *Tree, gpa: *Allocator) !void {
+fn typeCheck(tree: Tree, gpa: *Allocator, errors: ?*[]Parser.Error) !void {
     const tags = tree.nodes.items(.tag);
     const tokens = tree.nodes.items(.token);
     var block_type: []const u8 = undefined;
     var err = false;
+    var list = ArrayListUnmanaged(Parser.Error){};
     for (tags) |tag, i| switch (tag) {
         .type => block_type = tree.getTokenSlice(tokens[i]),
         .placeholder => {
             const placeholder = tree.getTokenSlice(tokens[i]);
-            const node_type = tree.getTokenSlice(tokens[i - 1]);
-            if (tree.getToken(tokens[i] + 1).tag == .colon) {}
+            const node = tree.name_map.get(placeholder) orelse {
+                err = true;
+                continue;
+            };
+
+            const Pair = struct { type: []const u8, token: Tokenizer.Token };
+
+            const node_type = tree.getTokenSlice(tokens[node.head - 1]);
+            const colon = tree.getTokenSlice(tokens[i] + 1);
+            if (mem.eql(u8, ":", colon)) {
+                const pair: Pair = blk: {
+                    if (tree.getToken(tokens[node.head] + 3).tag == .l_paren) {
+                        // get the defined cast type
+                        const index = tokens[node.head] + 4;
+                        break :blk .{
+                            .type = tree.getTokenSlice(index),
+                            .token = tree.getToken(index),
+                        };
+                    } else {
+                        // get the explicit type
+                        const index = tokens[node.head] + 2;
+                        break :blk .{
+                            .type = tree.getTokenSlice(index),
+                            .token = tree.getToken(index),
+                        };
+                    }
+                };
+
+                if (!mem.eql(u8, node_type, pair.type)) {
+                    err = true;
+                    if (errors != null) try list.append(gpa, .{
+                        .code = .{ .type_error = node_type },
+                        .token = pair.token,
+                    });
+                }
+            } else {
+                if (!mem.eql(u8, block_type, node_type)) {
+                    err = true;
+                    if (errors != null) try list.append(gpa, .{
+                        .code = .{ .type_error = block_type },
+                        .token = tree.getToken(tokens[i]),
+                    });
+                }
+            }
         },
         else => {},
     };
+
+    if (errors) |e| e.* = list.toOwnedSlice(gpa);
+    if (err) return error.TypeCheckFailed;
 }
 
 fn renderBlock(
@@ -319,7 +366,7 @@ test "render python" {
 test "render double inline" {
     try testTangle(
         \\some text `one`{.txt #a} more text `two`{.txt #b}.
-        \\```{.zig file="foo.zig"}
+        \\```{.txt file="foo.zig"}
         \\<<a>> <<b>>
         \\```
     , .{ .@"foo.zig" = 

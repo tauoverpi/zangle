@@ -39,6 +39,7 @@ pub fn build(b: *std.build.Builder) !void {
     const doctest = try lib.build.DocTestStep.init(b);
     try doctest.addFile("docs/zangle/main.md");
     try doctest.addFile("docs/zangle/configuration.md");
+    try doctest.addFile("docs/license.md");
 
     const tangle_step = b.step("tangle", "Extract executable code from documentation");
     tangle_step.dependOn(&tangler.step);

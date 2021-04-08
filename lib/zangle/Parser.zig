@@ -128,6 +128,10 @@ pub const Error = struct {
             .invalid_delimiter => |d| try writer.print("`{s}' is not a valid delimiter", .{d}),
             .invalid_meta_block => try writer.writeAll("metadata block is not correctly formed"),
             .unknown_filter => |s| try writer.print("`{s}' is not a known filter type", .{s}),
+            .type_error => |t| try writer.print("`{s}' does not match the expected type `{s}'", .{
+                e.token.slice(text),
+                t,
+            }),
         }
 
         try writer.writeByte('\n');
@@ -168,9 +172,7 @@ pub const SyntaxError = union(enum) {
     invalid_delimiter: []const u8,
     invalid_meta_block,
     unknown_filter,
-
-    // render
-
+    type_error: []const u8,
 };
 
 fn testErrorString(e: Error, config: Error.ErrorConfig, text: []const u8, expected: []const u8) !void {

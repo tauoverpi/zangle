@@ -3,7 +3,7 @@
 # License
 
 
-```{.txt #copyright-comment}
+```{.zig #copyright-comment}
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2021 Simon A. Nielsen Knights
 ```
