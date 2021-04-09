@@ -33,22 +33,24 @@ doctests: []DocTest,
 pub const ParserOptions = struct {
     delimiter: Parser.Delimiter = .chevron,
     errors: ?*[]Parser.Error = null,
+    typecheck: bool = true,
 };
 
 pub fn parse(gpa: *Allocator, text: []const u8, options: ParserOptions) !Tree {
     var p = try Parser.init(gpa, text);
+    errdefer p.deinit();
     p.delimiter = options.delimiter;
-    p.resolve() catch |e| {
+    errdefer |e| {
         if (options.errors) |ptr| {
             ptr.* = p.errors.toOwnedSlice(gpa);
         } else {
             p.errors.deinit(gpa);
         }
+    }
+    try p.resolve();
+    if (options.typecheck) try p.typeCheck();
 
-        p.deinit();
-        return e;
-    };
-    var self = Tree{
+    return Tree{
         .text = p.text,
         .tokens = p.tokens,
         .nodes = p.nodes.toOwnedSlice(),
@@ -56,9 +58,6 @@ pub fn parse(gpa: *Allocator, text: []const u8, options: ParserOptions) !Tree {
         .name_map = p.name_map,
         .doctests = p.doctests.toOwnedSlice(gpa),
     };
-    errdefer self.deinit(gpa);
-    try typeCheck(self, gpa, options.errors);
-    return self;
 }
 
 fn getToken(tree: Tree, index: usize) Token {
@@ -77,77 +76,15 @@ pub fn deinit(tree: *Tree, gpa: *Allocator) void {
     tree.nodes.deinit(gpa);
     gpa.free(tree.roots);
     var it = tree.name_map.iterator();
-    while (it.next()) |entry| entry.value.trail.deinit(gpa);
+    while (it.next()) |entry| entry.value.tail.deinit(gpa);
     tree.name_map.deinit(gpa);
-}
-
-fn typeCheck(tree: Tree, gpa: *Allocator, errors: ?*[]Parser.Error) !void {
-    const tags = tree.nodes.items(.tag);
-    const tokens = tree.nodes.items(.token);
-    var block_type: []const u8 = undefined;
-    var err = false;
-    var list = ArrayListUnmanaged(Parser.Error){};
-    for (tags) |tag, i| switch (tag) {
-        .type => block_type = tree.getTokenSlice(tokens[i]),
-        .placeholder => {
-            const placeholder = tree.getTokenSlice(tokens[i]);
-            const node = tree.name_map.get(placeholder) orelse {
-                err = true;
-                continue;
-            };
-
-            const Pair = struct { type: []const u8, token: Tokenizer.Token };
-
-            const node_type = tree.getTokenSlice(tokens[node.head - 1]);
-            const colon = tree.getTokenSlice(tokens[i] + 1);
-            if (mem.eql(u8, ":", colon)) {
-                const pair: Pair = blk: {
-                    if (tree.getToken(tokens[node.head] + 3).tag == .l_paren) {
-                        // get the defined cast type
-                        const index = tokens[node.head] + 4;
-                        break :blk .{
-                            .type = tree.getTokenSlice(index),
-                            .token = tree.getToken(index),
-                        };
-                    } else {
-                        // get the explicit type
-                        const index = tokens[node.head] + 2;
-                        break :blk .{
-                            .type = tree.getTokenSlice(index),
-                            .token = tree.getToken(index),
-                        };
-                    }
-                };
-
-                if (!mem.eql(u8, node_type, pair.type)) {
-                    err = true;
-                    if (errors != null) try list.append(gpa, .{
-                        .code = .{ .type_error = node_type },
-                        .token = pair.token,
-                    });
-                }
-            } else {
-                if (!mem.eql(u8, block_type, node_type)) {
-                    err = true;
-                    if (errors != null) try list.append(gpa, .{
-                        .code = .{ .type_error = block_type },
-                        .token = tree.getToken(tokens[i]),
-                    });
-                }
-            }
-        },
-        else => {},
-    };
-
-    if (errors) |e| e.* = list.toOwnedSlice(gpa);
-    if (err) return error.TypeCheckFailed;
 }
 
 fn renderBlock(
     tree: Tree,
     start: Node.Index,
     end: Node.Index,
-    indent: Parser.Indent,
+    indent: usize,
     writer: anytype,
 ) !void {
     const tokens = tree.tokens.items(.tag);
@@ -193,16 +130,111 @@ pub fn filename(tree: Tree, root: RootIndex) []const u8 {
 }
 
 pub fn tangle(tree: Tree, gpa: *Allocator, root: RootIndex, writer: anytype) !void {
-    var stack = ArrayList(RenderNode).init(gpa);
+    testing.log_level = .debug;
+
+    var stack = ArrayList(struct {
+        head: Node.Index,
+        last: Node.Index,
+        tail: []const Node.Index,
+        indent: usize,
+        data: Parser.Node.BlockData,
+        is_trail: bool,
+    }).init(gpa);
     defer stack.deinit();
 
-    var left = ArrayList(u8).init(gpa);
-    defer left.deinit();
+    try stack.append(.{
+        .head = root.index + 1,
+        .last = root.index,
+        .tail = &.{},
+        .indent = 0,
+        // don't care what the data is as it's never used
+        .data = Node.BlockData.cast(0),
+        .is_trail = false,
+    });
 
-    var right = ArrayList(u8).init(gpa);
-    defer right.deinit();
+    const tags = tree.nodes.items(.tag);
+    const tokens = tree.nodes.items(.token);
+    const indents = tree.nodes.items(.data);
+    const blockdata = indents; // same field, different meaning
+    const ttags = tree.tokens.items(.tag);
 
-    try tree.tangleInternal(&stack, &left, &right, root, writer);
+    var indent: usize = 0;
+    while (stack.items.len > 0) {
+        const node = &stack.items[stack.items.len - 1];
+
+        // The tag before will only ever be a chevron if this is a
+        // placeholder thus it's always safe to check for it.
+        const offset = @intCast(Node.Index, if (ttags[tokens[node.last] - 1] == .l_chevron) 1 + mem.indexOfScalar(
+            Tokenizer.Token.Tag,
+            ttags[tokens[node.last]..],
+            .r_chevron,
+        ).? else 0);
+
+        switch (tags[node.head]) {
+            .placeholder => {
+                const start = offset + tokens[node.last];
+                const end = tokens[node.head] - 1;
+
+                const block = tree.name_map.get(tree.getTokenSlice(tokens[node.head])).?;
+                const data = Node.BlockData.cast(blockdata[block.head]);
+
+                try stack.append(.{
+                    .head = block.head + 1,
+                    .last = block.head,
+                    .tail = block.tail.items,
+                    .indent = indent,
+                    .data = data,
+                    .is_trail = false,
+                });
+
+                try tree.renderBlock(start, end, indent, writer);
+
+                indent += indents[node.head];
+                node.head += 1;
+                node.last += 1;
+            },
+
+            .end => {
+                const term = stack.pop();
+                const start = offset + tokens[term.last];
+                const end = tokens[term.head];
+
+                if (term.data.inline_block) {
+                    try tree.renderBlock(start, end, indent, writer);
+                    indent = term.indent;
+                } else if (term.is_trail) {
+                    if (term.indent == indent) {
+                        try tree.renderBlock(start, end - 1, indent, writer);
+                    } else {
+                        try tree.renderBlock(start - 1, end - 1, indent, writer);
+                    }
+                } else if (term.tail.len == 0) {
+                    // skip if a block is empty
+                    if (start < end) {
+                        try tree.renderBlock(start, end - 1, indent, writer);
+                    }
+                    indent = term.indent;
+                } else {
+                    try tree.renderBlock(start, end, indent, writer);
+                }
+
+                for (term.tail) |_, i| {
+                    const n = term.tail.len - (i + 1);
+                    const tail = term.tail[n];
+                    try stack.append(.{
+                        .head = tail + 1,
+                        .last = tail,
+                        .tail = &.{},
+                        .indent = if (n != 0) term.indent else indent,
+                        .data = Node.BlockData.cast(blockdata[tail]),
+                        .is_trail = true,
+                    });
+                }
+            },
+
+            else => unreachable,
+        }
+    }
 }
 
 const FilterItem = union(enum) {
@@ -227,97 +259,6 @@ pub const RenderNode = struct {
     filter: FilterItem = .none,
 };
 
-pub fn tangleInternal(
-    tree: Tree,
-    stack: *ArrayList(RenderNode),
-    left: *ArrayList(u8),
-    right: *ArrayList(u8),
-    root: RootIndex,
-    writer: anytype,
-) !void {
-    // The Game, you just lost it
-    const tags = tree.nodes.items(.tag);
-    const tokens = tree.nodes.items(.token);
-    const starts = tree.tokens.items(.start);
-    const data = tree.nodes.items(.data);
-
-    left.shrinkRetainingCapacity(0);
-    right.shrinkRetainingCapacity(0);
-    var lindex: usize = 0;
-    var rindex: usize = 0;
-    var direction: ?FilterItem.Direction = null;
-    try stack.append(.{
-        .node = root.index + 1,
-        .last = root.index,
-        .offset = 0,
-        .indent = 0,
-        .trail = &.{},
-        .filter = .none,
-    });
-
-    var indent: Parser.Indent = 0;
-    testing.log_level = .debug;
-
-    while (stack.items.len > 0) {
-        var index = stack.items.len - 1;
-        var item = stack.items[index];
-
-        if (tags[item.node] != .placeholder) {
-            assert(tags[item.node] == .end);
-            if (stack.items.len == 0) return;
-
-            const start = tokens[item.last] + @intCast(Node.Index, item.offset);
-            const end = tokens[item.node];
-            // check if block is empty
-            try tree.renderBlock(start, end, indent, writer);
-
-            _ = stack.pop();
-
-            if (item.trail.len == 0) indent = math.sub(Parser.Indent, indent, item.indent) catch 0;
-
-            for (item.trail) |_, i| {
-                const trail = item.trail[(item.trail.len - 1) - i];
-                try stack.append(.{
-                    .node = trail + 1,
-                    .last = trail,
-                    .indent = if (i == item.trail.len - 1) item.indent else 0,
-                    .offset = 0,
-                    .trail = &.{},
-                });
-            }
-        } else {
-            stack.items[index].node = item.node + 1;
-            stack.items[index].last = item.node;
-            stack.items[index].offset = 2;
-
-            const token = tokens[item.node];
-            const slice = tree.getTokenSlice(token);
-            const maybe_sep = tree.getToken(token + 1);
-            const node = tree.name_map.get(slice) orelse {
-                return error.UnboundPlaceholder;
-            };
-            const start = tokens[item.last] + @intCast(Node.Index, item.offset);
-            const end = tokens[item.node] - 1;
-
-            try tree.renderBlock(start, end, indent, writer);
-
-            for (stack.items) |prev| if (prev.node == node.head) return error.CycleDetected;
-
-            var filter: FilterItem = .none;
-
-            indent += data[item.node];
-            try stack.append(.{
-                .node = node.head + 1,
-                .last = node.head,
-                .offset = 0,
-                .indent = data[item.node],
-                .trail = node.trail.items,
-                .filter = filter,
-            });
-        }
-    }
-}
-
 fn testTangle(input: []const u8, expected: anytype) !void {
     const allocator = std.testing.allocator;
 
@@ -337,6 +278,18 @@ fn testTangle(input: []const u8, expected: anytype) !void {
     }
 }
 
+test "render inline inline" {
+    try testTangle(
+        \\example `:~`{.a #a}
+        \\
+        \\```{.a file=a}
+        \\<<a>>
+        \\```
+    , .{ .a = 
+    \\:~
+    });
+}
+
 test "render python" {
     try testTangle(
         \\Testing `42`{.python #number} definitions.
@@ -346,6 +299,9 @@ test "render python" {
         \\    <<block>>
         \\```
         \\
+        \\```{.python #comment}
+        \\# then return the truth
+        \\```
         \\```{.python #comment}
         \\# then return the truth
         \\```
@@ -359,6 +315,8 @@ test "render python" {
     , .{ .@"example.zig" = 
     \\def universe(question):
     \\    answer = 42 # comment
+    \\    # then return the truth
+    \\    # then return the truth
     \\    # then return the truth
     \\    # then return the truth
     \\    return answer
@@ -377,17 +335,74 @@ test "render double inline" {
 }
 
 test "render ignore type signature" {
-    if (true) return error.SkipZigTest;
     try testTangle(
         \\```{.zig #a}
         \\a
         \\```
         \\
         \\```{.zig file="thing.zig"}
-        \\<<a:zig>>
+        \\<<a:from(zig)>>
         \\```
     , .{ .@"thing.zig" = 
     \\a
+    });
+}
+
+test "render inline" {
+    try testTangle(
+        \\`a`{.zig #a}
+        \\`a`{.zig #a}
+        \\`a`{.zig #a}
+        \\```{.zig file=thing.zig}
+        \\<<a>>
+        \\```
+    , .{ .@"thing.zig" = 
+    \\aaa
+    });
+}
+
+test "render indent" {
+    try testTangle(
+        \\```{.zig #a}
+        \\@
+        \\```
+        \\```{.zig #b}
+        \\#
+        \\   <<a:from(zig)>>
+        \\```
+        \\```{.zig #c}
+        \\#
+        \\   <<b:zig>>
+        \\```
+        \\```{.zig #d}
+        \\#
+        \\   <<c>>
+        \\```
+        \\```{.zig #e}
+        \\#
+        \\   <<d:zig>>
+        \\```
+        \\```{.zig #b}
+        \\#
+        \\```
+        \\```{.zig #b}
+        \\#
+        \\```
+        \\```{.zig file=thing.zig}
+        \\+
+        \\  <<e:from(zig)>>
+        \\+
+        \\```
+    , .{ .@"thing.zig" = 
+    \\+
+    \\  #
+    \\     #
+    \\        #
+    \\           #
+    \\              @
+    \\           #
+    \\           #
+    \\+
     });
 }
 

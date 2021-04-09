@@ -35,6 +35,7 @@ pub fn build(b: *std.build.Builder) !void {
     const weaver = try lib.build.WeaveStep.init(b, .github, "README.md");
     try weaver.addFile("docs/zangle/main.md");
     try weaver.addFile("docs/zangle/configuration.md");
+    try weaver.addFile("docs/license.md");
 
     const doctest = try lib.build.DocTestStep.init(b);
     try doctest.addFile("docs/zangle/main.md");

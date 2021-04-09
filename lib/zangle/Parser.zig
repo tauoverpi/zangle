@@ -64,8 +64,8 @@ pub const DocTestList = ArrayListUnmanaged(DocTest);
 pub const RootIndex = struct { index: Node.Index };
 pub const RootList = ArrayListUnmanaged(RootIndex);
 pub const NameMap = std.StringHashMapUnmanaged(Name);
-pub const Name = struct { head: Node.Index, trail: Trail };
-pub const Trail = ArrayListUnmanaged(Node.Index);
+pub const Name = struct { head: Node.Index, tail: Tail };
+pub const Tail = ArrayListUnmanaged(Node.Index);
 
 pub const Delimiter = enum {
     //! Delimiter - the delimiter used for the current block being parsed.
@@ -129,8 +129,8 @@ pub const Error = struct {
             .invalid_meta_block => try writer.writeAll("metadata block is not correctly formed"),
             .unknown_filter => |s| try writer.print("`{s}' is not a known filter type", .{s}),
             .type_error => |t| try writer.print("`{s}' does not match the expected type `{s}'", .{
-                e.token.slice(text),
-                t,
+                t.got,
+                t.expect,
             }),
         }
 
@@ -142,13 +142,13 @@ pub const Error = struct {
             try writer.writeAll(text[start..end]);
             if (config.colour) try writer.writeAll("\x1b[0m");
 
-            var trail: usize = end;
+            var tail: usize = end;
             for (text[end..]) |byte| {
                 if (byte == '\n' or byte == '\r') break;
-                trail += 1;
+                tail += 1;
             }
 
-            try writer.print("{s}\n", .{text[end..trail]});
+            try writer.print("{s}\n", .{text[end..tail]});
             try writer.writeByteNTimes(' ', start - line_start);
             if (config.colour) try writer.writeAll("\x1b[31m");
             try writer.writeByte('^');
@@ -172,7 +172,7 @@ pub const SyntaxError = union(enum) {
     invalid_delimiter: []const u8,
     invalid_meta_block,
     unknown_filter,
-    type_error: []const u8,
+    type_error: struct { expect: []const u8, got: []const u8 },
 };
 
 fn testErrorString(e: Error, config: Error.ErrorConfig, text: []const u8, expected: []const u8) !void {
@@ -325,7 +325,7 @@ pub fn deinit(p: *Parser) void {
     p.roots.deinit(p.gpa);
     p.doctests.deinit(p.gpa);
     var it = p.name_map.iterator();
-    while (it.next()) |entry| entry.value.trail.deinit(p.gpa);
+    while (it.next()) |entry| entry.value.tail.deinit(p.gpa);
     p.name_map.deinit(p.gpa);
     p.* = undefined;
 }
@@ -394,6 +394,66 @@ pub fn resolve(p: *Parser) !void {
     }
 }
 
+pub fn typeCheck(p: *Parser) !void {
+    const tags = p.nodes.items(.tag);
+    const tokens = p.nodes.items(.token);
+    var block_type: []const u8 = undefined;
+    var err = false;
+    for (tags) |tag, i| switch (tag) {
+        .type => block_type = p.getTokenSlice(tokens[i]),
+        .placeholder => {
+            const placeholder = p.getTokenSlice(tokens[i]);
+            const node = p.name_map.get(placeholder) orelse {
+                err = true;
+                continue;
+            };
+
+            const Pair = struct { type: []const u8, token: Tokenizer.Token };
+
+            const node_type = p.getTokenSlice(tokens[node.head - 1]);
+            const colon = p.getTokenSlice(tokens[i] + 1);
+            if (mem.eql(u8, ":", colon)) {
+                const pair: Pair = blk: {
+                    if (p.getToken(tokens[i] + 3).tag == .l_paren) {
+                        // get the defined cast type
+                        const index = tokens[i] + 4;
+                        break :blk .{
+                            .type = p.getTokenSlice(index),
+                            .token = p.getToken(index),
+                        };
+                    } else {
+                        // get the explicit type
+                        const index = tokens[i] + 2;
+                        break :blk .{
+                            .type = p.getTokenSlice(index),
+                            .token = p.getToken(index),
+                        };
+                    }
+                };
+
+                if (!mem.eql(u8, node_type, pair.type)) {
+                    err = true;
+                    try p.errors.append(p.gpa, .{
+                        .code = .{ .type_error = .{ .expect = node_type, .got = pair.type } },
+                        .token = pair.token,
+                    });
+                }
+            } else {
+                if (!mem.eql(u8, block_type, node_type)) {
+                    err = true;
+                    try p.errors.append(p.gpa, .{
+                        .code = .{ .type_error = .{ .expect = block_type, .got = node_type } },
+                        .token = p.getToken(tokens[i]),
+                    });
+                }
+            }
+        },
+        else => {},
+    };
+
+    if (err) return error.TypeCheckFailed;
+}
+
 /// Scan above the current block for placeholders and add this node to the
 /// respective placeholders' node list.
 fn addTagNames(p: *Parser, block: Node.Index) !void {
@@ -411,11 +471,11 @@ fn addTagNames(p: *Parser, block: Node.Index) !void {
                     const name = p.getTokenSlice(tokens[i]);
                     const result = try p.name_map.getOrPut(p.gpa, name);
                     if (result.found_existing) {
-                        try result.entry.value.trail.append(p.gpa, block);
+                        try result.entry.value.tail.append(p.gpa, block);
                     } else {
                         result.entry.value = .{
                             .head = block,
-                            .trail = Trail{},
+                            .tail = Tail{},
                         };
                     }
                 },
@@ -512,7 +572,7 @@ fn parseFencedBlock(p: *Parser) !Node.Index {
 
     try p.nodes.append(p.gpa, .{
         .tag = .end,
-        .token = @intCast(Node.Index, block_end),
+        .token = @intCast(Node.Index, block_end + 1),
         .data = undefined,
     });
 
@@ -899,16 +959,26 @@ fn findStartOfBlock(p: *Parser) ?Block {
                 // not a passable codeblock, skip it and keep searching
                 p.index = block + 1;
             }
-        } else if (mem.lastIndexOfScalar(Tokenizer.Token.Tag, tokens[0..block], .fence)) |start| {
-            if (start < block) {
-                // by the time we've verified the current block to be inline we've also
-                // found the start of the block thus we return the start to avoid
-                // searcing for it again
-                p.index = block;
-                return Block{ .inline_block = start + 2 };
-            } else {
-                // not a passable codeblock, skip it and keep searching
-                p.index = block - 1;
+        } else {
+            // found inline block
+            const fence = p.getTokenSlice(block);
+            assert(p.getToken(block).tag == .fence);
+            var backtrack: usize = block;
+            while (true) {
+                const start = mem.lastIndexOfScalar(Tokenizer.Token.Tag, tokens[0..backtrack], .fence) orelse {
+                    p.index = block - 1;
+                    break;
+                };
+                if (mem.eql(u8, fence, p.getTokenSlice(start))) {
+                    // by the time we've verified the current block to be inline we've also
+                    // found the start of the block thus we return the start to avoid
+                    // searcing for it again
+                    p.index = block;
+                    return Block{ .inline_block = start + 2 };
+                } else {
+                    // not a passable codeblock, skip it and keep searching
+                    backtrack = start;
+                }
             }
         }
     } else return null;
