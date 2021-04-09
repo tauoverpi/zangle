@@ -98,20 +98,13 @@ pub fn main() !void {
     defer tree.deinit(gpa);
 
     if (args.tangle) {
-        var stack = ArrayList(Tree.RenderNode).init(gpa);
-        var left= ArrayList(u8).init(gpa);
-        var right= ArrayList(u8).init(gpa);
-        defer stack.deinit();
-        defer left.deinit();
-        defer right.deinit();
+
 
         for (tree.roots) |root| {
-            defer stack.shrinkRetainingCapacity(0);
-            defer left.shrinkRetainingCapacity(0);
-            defer right.shrinkRetainingCapacity(0);
             const filename = tree.filename(root);
             log.info("writing {s}", .{filename});
 
+            if (fs.path.dirname(filename)) |path| try fs.cwd().makePath(path);
             var file = try fs.cwd().createFile(filename, .{
                 .truncate = true,
             });
@@ -119,7 +112,7 @@ pub fn main() !void {
 
             var stream = io.bufferedWriter(file.writer());
 
-            try tree.tangleInternal(&stack, &left, &right, root, stream.writer());
+            try tree.tangle(gpa, root, stream.writer());
 
             try stream.flush();
         }
@@ -415,3 +408,38 @@ while (true) {
     };
 } else unreachable
 ```
+\break
+
+# License
+
+
+**copyright-comment**
+```zig
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2021 Simon A. Nielsen Knights
+```
+
+```txt
+MIT License
+
+Copyright (c) 2021 Simon A. Nielsen Knights
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+

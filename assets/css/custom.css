@@ -2,6 +2,8 @@
   width: 100%;
 }
 
+pre { margin: 0em; }
+
 /* NAVBAR */
 .nav-logo {}
 
@@ -31,10 +33,12 @@
   height: 100%;
   width: 100%;
   padding-top: 10em;
-}.code-block {
+}
+.code-block {
   margin-bottom: 2em;
   margin-top: 2em;
-  padding: 0em;
+  padding-top: 1em;
+  padding-bottom: 1em;
   width: 100vw;
   border: none;
   color: #eeeeee;
@@ -60,7 +64,10 @@
   border: none;
   color: #000000;
   background-color: #f6f5ee;
-}.type-safe-header {
+}.type-error {
+    color: #cc241d;
+}
+.type-safe-header {
   color: #664270;
   text-align: center;
 }.filters-header {
@@ -88,8 +95,6 @@
 body {
   background-color: #ecf0e7;
 }
-
-
 
 p { font-size: 1.5em; }
 

@@ -25,7 +25,7 @@ content.
     </div>
 
     <div class="section main">
-      {{main-content}}
+{{main-content}}
     </div>
 
     <div class="section footer">
@@ -40,7 +40,7 @@ content.
 
 ```{.html #navbar}
 <span class="logo">
-  {{zangle-logo}}
+  {{zangle-logo:from(svg)}}
 </span>
 ```
 
@@ -86,12 +86,12 @@ content.
 
 ```
 
-```{.txt #short-description-of-zangle}
+```{.html #short-description-of-zangle}
 <span class="zangle">Zangle</span> is a literate programming tool compatible
 with pandoc markdown in the form of a library with a command-line frontend.
 ```
 
-```{.txt #longer-description-of-zangle}
+```{.html #longer-description-of-zangle}
 [more text here]
 ```
 
@@ -111,11 +111,11 @@ with pandoc markdown in the form of a library with a command-line frontend.
 ```{.html #main-content}
 <div class="code-block">
   <div class="container">
-    <pre>
-      <code class="code">
-{{example-code-block}}
-      </code>
-    </pre>
+    <code class="code">
+<pre>
+{{example-code-block:from(zig)}}
+</pre>
+    </code>
   </div>
 </div>
 
@@ -123,7 +123,6 @@ with pandoc markdown in the form of a library with a command-line frontend.
 
 
 ```{.zig #example-code-block}
-
 const std = @import("std");
 const zangle = @import("zangle");
 
@@ -144,7 +143,8 @@ pub fn main() !void {
 .code-block {
   margin-bottom: 2em;
   margin-top: 2em;
-  padding: 0em;
+  padding-top: 1em;
+  padding-bottom: 1em;
   width: 100vw;
   border: none;
   color: {{code-normal-colour}};
@@ -176,34 +176,47 @@ pub fn main() !void {
 # Type safe
 
 ```{.html #main-content}
-<h3 class="type-safe-header">Type safe (incomplete)</h3>
+<h3 class="type-safe-header">Type safe</h3>
 <div class="container">
   <p>{{type-error-description}}</p>
 </div>
 <div class="code-block">
   <div class="container">
-    <pre>
+    <div class="four columns">
       <code class="code">
+<pre>
 {{type-error-code-block}}
+</pre>
       </code>
-    </pre>
+    </div>
+    <div class="eight columns">
+      <code class="code">
+<pre>
+{{type-error-message}}
+</pre>
+      </code>
+    </div>
   </div>
 </div>
+
 <div class="container">
   <p>{{type-safe-description}}</p>
 </div>
 <div class="code-block">
   <div class="container">
-    <pre>
-      <code class="code">
+    <code class="code">
+<pre>
 {{type-safe-code-block}}
-      </code>
-    </pre>
+</pre>
+    </code>
   </div>
 </div>
 ```
 
 ```{.css #main-block}
+.type-error {
+    color: {{type-error-colour}};
+}
 .type-safe-header {
   color: {{type-safe-colour}};
   text-align: center;
@@ -219,15 +232,20 @@ documentation bug.
 
 
 ~~~{.html delimiter="none" #type-error-code-block}
-TODO: error message
 ```{.html #example}
+&lt;code&gt;
 &lt;pre&gt;
-  &lt;code&gt;
-    {{zig-html-test|escape html}}
-  &lt;/code&gt;
+{{zig-html-test|escape html}}
 &lt;/pre&gt;
+&lt;/code&gt;
 ```
 ~~~
+
+```{.html #type-error-message}
+error on line 4 col 3: `zig' does not match the expected type `html'
+{{<span class="type-error">zig-html-test</span>|escape html}}
+  <span class="type-error">^~~~~~~~~~~~~</span>
+```
 
 ```{.html #type-safe-description}
 Merging between blocks of different types is still allowed
@@ -237,11 +255,11 @@ type of the block matches the type specification.
 
 ~~~{.html delimiter="none" #type-safe-code-block}
 ```{.html #example}
+&lt;code&gt;
 &lt;pre&gt;
-  &lt;code&gt;
-    {{zig-html-test:from(zig)|escape html}}
-  &lt;/code&gt;
+{{zig-html-test:from(zig)|escape html}}
 &lt;/pre&gt;
+&lt;/code&gt;
 ```
 ~~~
 
@@ -256,32 +274,31 @@ type of the block matches the type specification.
 <div class="code-block">
   <div class="container">
     <div class="seven columns">
-      <pre>
-        <code class="code">
+      <code class="code">
+<pre>
 {{filter-zangle-code-block}}
-        </code>
-      </pre>
+</pre>
+      </code>
     </div>
 
     <div class="five columns">
-      <pre>
-        <code class="code">
+      <code class="code">
+<pre>
 {{filter-zig-code-block}}
-        </code>
-      </pre>
+</pre>
+      </code>
     </div>
   </div>
 </div>
 ```
 
-```{.txt #short-filter-description}
+```{.html #short-filter-description}
 <span class="zangle">Zangle</span> supports both inline and external filters on
 placeholders which enable running additional tools over the tangled code block
 before it's written to the document.
 ```
 
-~~~{.txt delimiter="none" #filter-zangle-code-block}
-
+~~~{.html delimiter="none" #filter-zangle-code-block}
 Create a page containing the code.
 
 ```{.html delimiter="brace" #html-escape-example}
@@ -291,11 +308,11 @@ Create a page containing the code.
     &lt;title&gt;Zangle - Iterate over filenames&lt;/title&gt;
   &lt;/head&gt;
   &lt;body&gt;
-    &lt;pre&gt;
-      &lt;code&gt;
-        {{example-code-block:from(zig)|escape html}}
-      &lt;/code&gt;
-    &lt;/pre&gt;
+    &lt;code&gt;
+&lt;pre&gt;
+{{example-code-block:from(zig)|escape html}}
+&lt;/pre&gt;
+    &lt;/code&gt;
   &lt;/body&gt;
 &lt;/html&gt;
 ```
@@ -311,8 +328,7 @@ def index():
 ```
 ~~~
 
-~~~{.txt delimiter="none" #filter-zig-code-block}
-
+~~~{.html delimiter="none" #filter-zig-code-block}
 Declare a function for generating html.
 
 ```{.zig #example-code-block}
@@ -387,7 +403,7 @@ the document.
 </div>
 ```
 
-```{.txt #tryit-description}
+```{.html #tryit-description}
 Try it
 ```
 
@@ -448,6 +464,8 @@ Try it
   width: 100%;
 }
 
+pre { margin: 0em; }
+
 /* NAVBAR */
 {{navbar-css}}
 
@@ -463,8 +481,6 @@ Try it
 body {
   background-color: {{main-colour}};
 }
-
-
 
 p { font-size: 1.5em; }
 
@@ -496,6 +512,7 @@ p { font-size: 1.5em; }
 | `#664270`{.css #magenta #type-safe-colour}                            |
 | `#1d2021`{.css #blue-grey #code-block-colour}                         |
 | `#eeeeee`{.css #paper-white #code-normal-colour}                      |
+| `#cc241d`{.css #type-error-colour}                                    |
 
 : Colours used on the site
 

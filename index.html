@@ -136,50 +136,50 @@
     </div>
 
     <div class="section main">
-      <div class="container">
-        <div class="row">
-          <span class="nine columns">
-            <p><span class="zangle">Zangle</span> is a literate programming tool compatible
-               with pandoc markdown in the form of a library with a command-line frontend.</p>
-          </span>
-          <span class="three columns">
-            [insert image here]
-          </span>
-        </div>
-      
-        <div class="row">
-          <span class="three columns">
-            [insert image here]
-          </span>
-          <span class="nine columns">
-            <p>[more text here]</p>
-          </span>
-        </div>
-      </div>
-      <div class="code-block">
-        <div class="container">
-          <pre>
-            <code class="code">
-      
-      const std = @import("std");
-      const zangle = @import("zangle");
-      
-      pub fn main() !void {
-          const config = &lt;&lt;parse-command-line-arguments&gt;&gt;;
-          for (config.files) |filename| {
-              &lt;&lt;read-all-files-into-a-joint-buffer&gt;&gt;;
-          }
-      
-          var tree = try parse(gpa, source.items, .{});
-          defer tree.deinit();
-      
-          &lt;&lt;do-awesome-stuff-with-the-document&gt;&gt;
-      }
-            </code>
-          </pre>
-        </div>
-      </div>
-      <h3 class="type-safe-header">Type safe (incomplete)</h3>
+<div class="container">
+  <div class="row">
+    <span class="nine columns">
+      <p><span class="zangle">Zangle</span> is a literate programming tool compatible
+         with pandoc markdown in the form of a library with a command-line frontend.</p>
+    </span>
+    <span class="three columns">
+      [insert image here]
+    </span>
+  </div>
+
+  <div class="row">
+    <span class="three columns">
+      [insert image here]
+    </span>
+    <span class="nine columns">
+      <p>[more text here]</p>
+    </span>
+  </div>
+</div>
+
+<div class="code-block">
+  <div class="container">
+    <code class="code">
+<pre>
+const std = @import("std");
+const zangle = @import("zangle");
+
+pub fn main() !void {
+    const config = &lt;&lt;parse-command-line-arguments&gt;&gt;;
+    for (config.files) |filename| {
+        &lt;&lt;read-all-files-into-a-joint-buffer&gt;&gt;;
+    }
+
+    var tree = try parse(gpa, source.items, .{});
+    defer tree.deinit();
+
+    &lt;&lt;do-awesome-stuff-with-the-document&gt;&gt;
+}
+</pre>
+    </code>
+  </div>
+</div>
+<h3 class="type-safe-header">Type safe</h3>
 <div class="container">
   <p><span class="zangle">Zangle</span> is type safe, all blocks within
      <span class="Zangle"> are strongly typed acording to the given language tag
@@ -188,20 +188,31 @@
 </div>
 <div class="code-block">
   <div class="container">
-    <pre>
+    <div class="four columns">
       <code class="code">
-TODO: error message
+<pre>
 ```{.html #example}
+&lt;code&gt;
 &lt;pre&gt;
-  &lt;code&gt;
-    {{zig-html-test|escape html}}
-  &lt;/code&gt;
+{{zig-html-test|escape html}}
 &lt;/pre&gt;
+&lt;/code&gt;
 ```
+</pre>
       </code>
-    </pre>
+    </div>
+    <div class="eight columns">
+      <code class="code">
+<pre>
+error on line 4 col 3: `zig' does not match the expected type `html'
+{{<span class="type-error">zig-html-test</span>|escape html}}
+  <span class="type-error">^~~~~~~~~~~~~</span>
+</pre>
+      </code>
+    </div>
   </div>
 </div>
+
 <div class="container">
   <p>Merging between blocks of different types is still allowed
      with safe casts using <code class="inlinecode">from(type)</code> which ensures the specified
@@ -209,17 +220,17 @@ TODO: error message
 </div>
 <div class="code-block">
   <div class="container">
-    <pre>
-      <code class="code">
+    <code class="code">
+<pre>
 ```{.html #example}
+&lt;code&gt;
 &lt;pre&gt;
-  &lt;code&gt;
-    {{zig-html-test:from(zig)|escape html}}
-  &lt;/code&gt;
+{{zig-html-test:from(zig)|escape html}}
 &lt;/pre&gt;
+&lt;/code&gt;
 ```
-      </code>
-    </pre>
+</pre>
+    </code>
   </div>
 </div><h3 class="filters-header">Filters (incomplete)</h3>
 <div class="container">
@@ -231,9 +242,8 @@ TODO: error message
 <div class="code-block">
   <div class="container">
     <div class="seven columns">
-      <pre>
-        <code class="code">
-
+      <code class="code">
+<pre>
 Create a page containing the code.
 
 ```{.html delimiter="brace" #html-escape-example}
@@ -243,11 +253,11 @@ Create a page containing the code.
     &lt;title&gt;Zangle - Iterate over filenames&lt;/title&gt;
   &lt;/head&gt;
   &lt;body&gt;
-    &lt;pre&gt;
-      &lt;code&gt;
-        {{example-code-block:from(zig)|escape html}}
-      &lt;/code&gt;
-    &lt;/pre&gt;
+    &lt;code&gt;
+&lt;pre&gt;
+{{example-code-block:from(zig)|escape html}}
+&lt;/pre&gt;
+    &lt;/code&gt;
   &lt;/body&gt;
 &lt;/html&gt;
 ```
@@ -261,14 +271,13 @@ text = &lt;&lt;html-escape-example:from(html)|escape python-string&gt;&gt;
 def index():
     return text
 ```
-        </code>
-      </pre>
+</pre>
+      </code>
     </div>
 
     <div class="five columns">
-      <pre>
-        <code class="code">
-
+      <code class="code">
+<pre>
 Declare a function for generating html.
 
 ```{.zig #example-code-block}
@@ -296,8 +305,8 @@ pub fn main() !void {
     try stdout.writeAll("&lt;/ul&gt;");
 }
 ```
-        </code>
-      </pre>
+</pre>
+      </code>
     </div>
   </div>
 </div><h3 class="bi-header">Bi-directional editing (incomplete)</h3>
