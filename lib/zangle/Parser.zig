@@ -704,7 +704,11 @@ const Meta = struct {
 /// Parse the meta data block which follows a fence and
 /// allocate nodes for each tag found.
 fn parseMetaBlock(p: *Parser) !Meta {
-    p.expect(.l_brace) catch unreachable;
+    switch (p.consume() catch unreachable) {
+        .space => assert(p.consume() catch unreachable == .l_brace),
+        .l_brace => {},
+        else => unreachable,
+    }
 
     try p.expect(.dot);
     try p.expect(.identifier);
@@ -936,12 +940,11 @@ fn findStartOfBlock(p: *Parser) ?Block {
 
     while (p.index < p.tokens.len) {
         // search for a multi-line/inline code block `{.z
-        const block = mem.indexOfPos(Tokenizer.Token.Tag, tokens, p.index, &.{
-            .fence,
-            .l_brace,
-            .dot,
-            .identifier,
-        }) orelse return null;
+        const nospace = &.{ .fence, .l_brace, .dot, .identifier };
+        const spaced = &.{ .fence, .space, .l_brace, .dot, .identifier };
+        const block = mem.indexOfPos(Tokenizer.Token.Tag, tokens, p.index, nospace) orelse
+            mem.indexOfPos(Tokenizer.Token.Tag, tokens, p.index, spaced) orelse
+            return null;
 
         // figure out of this the real start
         const newline = mem.lastIndexOfScalar(Tokenizer.Token.Tag, tokens[0..block], .newline) orelse 0;

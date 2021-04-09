@@ -348,6 +348,20 @@ test "render ignore type signature" {
     });
 }
 
+test "render space before meta" {
+    try testTangle(
+        \\``` {.zig #a}
+        \\a
+        \\```
+        \\
+        \\```             {.zig file="thing.zig"}
+        \\<<a:from(zig)>>
+        \\```
+    , .{ .@"thing.zig" = 
+    \\a
+    });
+}
+
 test "render inline" {
     try testTangle(
         \\`a`{.zig #a}
