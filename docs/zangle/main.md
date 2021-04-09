@@ -20,7 +20,6 @@ similar to [entangled] with integration with the Zig build system.
 TODO:
 
 - [ ] weave - extract metadata (e.g title) from the YAML block and render it for github markdown
-- [x] weave - remove constructs github markdown doesn't support (excluding things which don't clash with the format)
 - [ ] weave - doctest rendering
 - [ ] weave - handle blocks marked as `.inline`
 - [ ] doctest - custom command runners
@@ -31,7 +30,7 @@ TODO:
 
 TODO explain blocks
 
-```{.zig #main-imports}
+``` {.zig #main-imports}
 const std = @import("std");
 const lib = @import("lib");
 const testing = std.testing;
@@ -47,7 +46,7 @@ The module also makes sure to reference all definitions within locally
 imported modules such as the configuration module through Zig's testing
 module using `testing.refAllDecls(config)`{.zig #main-test-case}.
 
-```{.zig #main-imports}
+``` {.zig #main-imports}
 const config = @import("config.zig");
 
 test {
@@ -55,7 +54,7 @@ test {
 }
 ```
 
-```{.zig file="src/main.zig" #main}
+``` {.zig file="src/main.zig" #main}
 <<copyright-comment>>
 
 <<main-imports>>

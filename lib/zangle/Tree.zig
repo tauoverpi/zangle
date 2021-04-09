@@ -75,6 +75,7 @@ pub fn deinit(tree: *Tree, gpa: *Allocator) void {
     tree.tokens.deinit(gpa);
     tree.nodes.deinit(gpa);
     gpa.free(tree.roots);
+    gpa.free(tree.doctests);
     var it = tree.name_map.iterator();
     while (it.next()) |entry| entry.value.tail.deinit(gpa);
     tree.name_map.deinit(gpa);
@@ -465,152 +466,13 @@ test "filename" {
 }
 
 pub const Weaver = enum {
-    github,
     pandoc,
-    //elara,
 };
 
 pub fn weave(tree: Tree, weaver: Weaver, writer: anytype) !void {
     switch (weaver) {
-        .github => try tree.weaveGithub(writer),
         .pandoc => try tree.weavePandoc(writer),
     }
-}
-
-pub fn weaveGithub(tree: Tree, writer: anytype) !void {
-    var last: usize = 0;
-    const tags = tree.nodes.items(.tag);
-    const tokens = tree.nodes.items(.token);
-    const data = tree.nodes.items(.data);
-    const source = tree.tokens.items(.tag);
-    var state: enum { scan, inline_block } = .scan;
-
-    done: { // remove the title block if it exists
-        const line = mem.indexOf(Tokenizer.Token.Tag, source, &.{.line_fence}) orelse break :done;
-
-        if (line != 0) for (source[0..line]) |token| switch (token) {
-            .newline, .space => {},
-            else => break :done,
-        };
-
-        const dot = mem.indexOf(Tokenizer.Token.Tag, source, &.{ .newline, .dot_fence }) orelse break :done;
-
-        if (line < dot and tokens[0] > dot) {
-
-            //last = tree.getToken(dot + 1).data.end;
-            for (source[dot + 2 ..]) |token, i| switch (token) {
-                .space => {},
-                .newline => last = tree.getToken(dot + i + 2).data.end,
-                else => break,
-            };
-        }
-    }
-
-    for (tags) |tag, i| switch (state) {
-        .scan => {
-            switch (tag) {
-                .block => if (Node.BlockData.cast(data[i]).inline_block) {
-                    state = .inline_block;
-                } else {
-                    const r_brace = tree.getToken(tokens[i] - 2);
-                    if (r_brace.tag == .r_brace) {
-                        if (mem.lastIndexOfScalar(Tokenizer.Token.Tag, source[0..tokens[i]], .l_brace)) |l_brace| {
-                            const fence = tree.getToken(l_brace - 1);
-                            const here = tree.getToken(l_brace).data.start;
-                            const slice = tree.text[last .. here - fence.len()];
-                            var j: usize = 1;
-
-                            try writer.writeAll(slice);
-
-                            while (j <= i) : (j += 1) switch (tags[i - j]) {
-                                .type, .filename => {},
-                                .tag => try writer.print("**{s}**\n", .{tree.getTokenSlice(tokens[i - j])}),
-                                else => break,
-                            };
-
-                            try writer.print("{s}{s}", .{
-                                fence.slice(tree.text),
-                                tree.getTokenSlice(@intCast(Node.Index, l_brace + 2)),
-                            });
-                            last = r_brace.data.end;
-                            continue;
-                        }
-                    }
-                },
-                else => continue,
-            }
-            const found = tree.getToken(tokens[i]);
-            const slice = tree.text[last..found.data.end];
-            try writer.writeAll(slice);
-            last += slice.len;
-        },
-
-        .inline_block => {
-            const found = tree.getToken(tokens[i]);
-            assert(tags[i] == .end);
-            try writer.writeAll(tree.text[last..found.data.end]);
-            if (source[tokens[i] + 1] == .l_brace) {
-                if (mem.indexOfScalarPos(Tokenizer.Token.Tag, source, tokens[i] + 1, .r_brace)) |index| {
-                    last = tree.getToken(index).data.end;
-                } else {
-                    last = found.data.end;
-                }
-            } else {
-                last = found.data.end;
-            }
-            state = .scan;
-        },
-    };
-
-    try writer.writeAll(tree.text[last..]);
-}
-
-test "weave github" {
-    try testWeave(.github, "Example `text`{.zig} in a block", "Example `text` in a block");
-    try testWeave(.github, "Example `text`{.zig}", "Example `text`");
-    try testWeave(.github,
-        \\```{.zig #a}
-        \\```
-    ,
-        \\**a**
-        \\```zig
-        \\```
-    );
-    try testWeave(.github,
-        \\---
-        \\...
-        \\```{.zig #a}
-        \\```
-    ,
-        \\**a**
-        \\```zig
-        \\```
-    );
-    try testWeave(.github,
-        \\---
-        \\...
-        \\
-        \\
-        \\
-        \\```{.zig #a}
-        \\```
-    ,
-        \\**a**
-        \\```zig
-        \\```
-    );
-    try testWeave(.github,
-        \\---
-        \\```{.zig #a}
-        \\```
-        \\...
-    ,
-        \\---
-        \\**a**
-        \\```zig
-        \\```
-        \\...
-    );
 }
 
 pub fn weavePandoc(tree: Tree, writer: anytype) !void {
@@ -675,67 +537,4 @@ fn testWeave(weaver: Weaver, input: []const u8, expected: []const u8) !void {
     try tree.weave(weaver, stream.writer());
 
     testing.expectEqualStrings(expected, stream.items);
-}
-
-pub fn Query(comptime tag: Node.Tag) type {
-    return switch (tag) {
-        .filename => struct {
-            tree: Tree,
-            index: usize = 0,
-
-            pub fn next(it: *@This()) ?[]const u8 {
-                if (it.index >= it.tree.nodes.len) return null;
-
-                const tags = it.tree.nodes.items(.tag);
-                const tokens = it.tree.nodes.items(.token);
-
-                while (mem.indexOfPos(Node.Tag, tags, it.index, &.{.filename})) |file| {
-                    const name = it.tree.getTokenSlice(tokens[file]);
-                    it.index = file + 1;
-                    return name;
-                }
-
-                return null;
-            }
-        },
-
-        .block => struct {
-            tree: Tree,
-            index: usize = 0,
-
-            pub fn next(it: *@This()) ?[]const u8 {
-                if (it.index >= it.tree.nodes.len) return null;
-
-                const tags = it.tree.nodes.items(.tag);
-                const tokens = it.tree.nodes.items(.token);
-                const tokens = it.tree.nodes.items(.data);
-
-                while (mem.indexOfPos(Node.Tag, tags, it.index, &.{.filename})) |file| {
-                    const name = it.tree.getTokenSlice(tokens[file]);
-                    it.index = file + 1;
-                    return name;
-                }
-
-                return null;
-            }
-        },
-
-        else => @compileError("no query object defined for " ++ @tagName(tag) ++ " yet"),
-    };
-}
-
-pub fn query(tree: Tree, comptime tag: Node.Tag, args: switch (tag) {
-    .filename => void,
-    else => @compileError("no query object defined for " ++ @tagName(tag) ++ " yet"),
-}) Query(tag) {
-    return Query(tag){ .tree = tree };
-}
-
-test "query" {
-    var tree = try Tree.parse(std.testing.allocator, "", .{});
-    defer tree.deinit(std.testing.allocator);
-
-    var it = tree.query(.filename, {});
-
-    _ = it.next();
 }

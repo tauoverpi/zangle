@@ -1,18 +1,18 @@
 # Configuration
 
-```{.zig #configuration-specification}
+``` {.zig #configuration-specification}
 pub const Configuration = struct {
     colour: bool = true,
     tangle: bool = true,
     debug_fail: bool = false,
     delimiter: Delimiter = .chevron,
     weave: ?[]const u8 = null,
-    format: Weaver = .github,
+    format: Weaver = .pandoc,
     files: ArrayListUnmanaged([]const u8) = .{},
 };
 ```
 
-```{.zig #configuration-specification}
+``` {.zig #configuration-specification}
 const ConfigTag = meta.FieldEnum(Configuration);
 
 const long = ComptimeStringMap(ConfigTag, .{
@@ -33,7 +33,7 @@ const pair = ComptimeStringMap(ConfigTag, .{
 });
 ```
 
-```{.zig #parse-configuration-parameters}
+``` {.zig #parse-configuration-parameters}
 blk: {
   var parameters: Configuration = .{};
 
@@ -44,7 +44,7 @@ blk: {
 }
 ```
 
-```{.zig file="src/config.zig"}
+``` {.zig file="src/config.zig"}
 const std = @import("std");
 const lib = @import("lib");
 const testing = std.testing;
@@ -74,7 +74,7 @@ dash, `short` for the single byte equivalent prefixed with a single dash,
 `=`, and `escape`, represented by a double dash, which declares that all
 following arguments should be read as files even if they have a dash prefix.
 
-```{.zig #cli-argument-type}
+``` {.zig #cli-argument-type}
 const Arg = union(enum) {
     pair: Pair,
     file: []const u8,
@@ -98,7 +98,7 @@ const Arg = union(enum) {
 
 The parser for command-line arguments.
 
-```{.zig #cli-parser}
+``` {.zig #cli-parser}
 <<cli-argument-type>>
 
 pub fn parseCliArgs(gpa: *Allocator, out: *Configuration) !void {
@@ -155,7 +155,7 @@ pub fn parseCliArgs(gpa: *Allocator, out: *Configuration) !void {
 
 
 
-```{.zig #cli-parser}
+``` {.zig #cli-parser}
 fn parseCliParam(text: []const u8) !Arg {
     var token: Tokenizer = .{ .text = text };
 
@@ -199,7 +199,7 @@ fn parseCliParam(text: []const u8) !Arg {
 }
 ```
 
-```{.zig #cli-parser}
+``` {.zig #cli-parser}
 test "parse cli parameter" {
     testing.expectEqual(@as(u8, 'f'), (try parseCliParam("-f")).short);
     testing.expectEqualStrings("watch", (try parseCliParam("--watch")).long);
@@ -216,7 +216,7 @@ test "parse cli parameter" {
 }
 ```
 
-```{.zig #configuration-file-parser}
+``` {.zig #configuration-file-parser}
 pub fn parseConfigFile(gpa: *Allocator, out: *Configuration) !void {
     var region = ArenaAllocator.init(gpa);
     defer region.deinit();
@@ -231,7 +231,7 @@ pub fn parseConfigFile(gpa: *Allocator, out: *Configuration) !void {
 }
 ```
 
-```{.zig #search-for-a-configuration-file}
+``` {.zig #search-for-a-configuration-file}
 while (true) {
     const filepath = try fs.path.join(arena, &.{path, ".zangle"});
     break fs.cwd().openFile(filepath, .{}) catch {

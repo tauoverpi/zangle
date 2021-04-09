@@ -32,11 +32,6 @@ pub fn build(b: *std.build.Builder) !void {
     try weave_pretty.addFile("docs/zangle/configuration.md");
     try weave_pretty.addFile("docs/license.md");
 
-    const weaver = try lib.build.WeaveStep.init(b, .github, "README.md");
-    try weaver.addFile("docs/zangle/main.md");
-    try weaver.addFile("docs/zangle/configuration.md");
-    try weaver.addFile("docs/license.md");
-
     const doctest = try lib.build.DocTestStep.init(b);
     try doctest.addFile("docs/zangle/main.md");
     try doctest.addFile("docs/zangle/configuration.md");
@@ -44,9 +39,6 @@ pub fn build(b: *std.build.Builder) !void {
 
     const tangle_step = b.step("tangle", "Extract executable code from documentation");
     tangle_step.dependOn(&tangler.step);
-
-    const weave_step = b.step("weave", "Pretty print documentation");
-    weave_step.dependOn(&weaver.step);
 
     const doctest_step = b.step("doctest", "Extract executable code from documentation and run zig test");
     doctest_step.dependOn(&doctest.step);
@@ -98,7 +90,6 @@ pub fn build(b: *std.build.Builder) !void {
 
     const all_step = b.step("all", "run all steps in the same order as the workflow");
     all_step.dependOn(&exe.step);
-    all_step.dependOn(weave_step);
     all_step.dependOn(lib_test_step);
     all_step.dependOn(test_step);
     all_step.dependOn(web_step);
