@@ -27,28 +27,6 @@ jobs:
           wget -qO zig.tar.xf "$(cat releases.json | jq -r '.master."x86_64-linux".tarball')"
           tar --strip-components=1 -xJf zig.tar.xf
 
-      - name: Build zangle
-        run: zig build
-
-      - name: Weave
-        run: zig build weave
-
-      - name: Run library tests
-        run: zig build test-lib
-
-      - name: Run application tests
+      - name: Run tests
         run: zig build test
 
-      - name: Build landing page
-        run: zig build web
-
-      - name: Run zangle
-        run: |
-          zig build run -- docs/index.md --delimiter=brace
-          zig build run
-
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v2.2.2
-        with:
-          name: zangle
-          path: zig-cache/bin/
