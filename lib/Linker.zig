@@ -6,6 +6,7 @@ const log = std.log.scoped(.linker);
 const Allocator = std.mem.Allocator;
 const Linker = @This();
 const Compiler = @import("Compiler.zig"); // for tests
+const Interpreter = @import("Interpreter.zig"); // for tests
 
 // TODO: figure out how to do most of this without memory allocation
 
@@ -77,29 +78,56 @@ pub fn link(l: *Linker, gpa: *Allocator) !void {
     for (l.objects.items) |obj, offset| {
         const module = offset + 1;
 
-        const procs = l.procedures.count();
         const files = l.files.count();
 
         try l.insert(gpa, @intCast(u16, module), obj);
 
-        log.debug("new module {} with {} procedures and {} files", .{
+        log.debug("new module {} with {} files", .{
             module,
-            l.procedures.count() - procs,
             l.files.count() - files,
         });
     }
 
+    try l.mergeAdjacentBlocks(gpa);
     l.patchCallSites();
 }
 
-pub fn update(l: *Linker, module: u16, obj: Object) !void {
-    l.remove(gpa, l.objects.items[module]);
-    try l.insert(gpa, module, obj);
-    // TODO: relink adjacent nodes
-    // TODO: patch sites (again)
-}
+fn mergeAdjacentBlocks(l: *Linker, gpa: *Allocator) !void {
+    for (l.objects.items[0..l.objects.items.len]) |*object, offset| {
+        const keys = object.adjacent.keys();
+        const values = object.adjacent.values();
+        for (keys) |key, i| {
+            const entry = try l.procedures.getOrPut(gpa, key);
+            if (!entry.found_existing) {
+                var last_adj = values[i];
+                var last_obj = object;
+                for (l.objects.items[offset + 1 ..]) |*next, negoff| {
+                    if (next.adjacent.get(key)) |current| {
+                        const exit = last_adj.module_exit;
+                        const bytecode = last_obj.bytecode;
 
-// fn mergeAdjacentBlocks(l: *Linker) !void {}
+                        bytecode[exit] = Interpreter.Bytecode.jmp.code();
+
+                        const module = @intCast(u16, negoff + 3);
+                        const start = current.module_entry;
+
+                        mem.writeIntSliceBig(u32, bytecode[exit + 1 .. exit + 5], start);
+                        mem.writeIntSliceBig(u16, bytecode[exit + 5 .. exit + 7], module);
+
+                        last_adj = current;
+                        last_obj = next;
+                    }
+                }
+
+                log.debug("new procedure {s}", .{key});
+                entry.value_ptr.* = .{
+                    .entry = values[i].module_entry,
+                    .module = @intCast(u16, offset + 1),
+                };
+            }
+        }
+    }
+}
 
 fn patchCallSites(l: *Linker) void {
     for (l.objects.items) |object, m| {
@@ -112,7 +140,7 @@ fn patchCallSites(l: *Linker) void {
                     mem.writeIntSliceBig(u16, object.bytecode[location + 4 .. location + 6], procs[i].module);
                 }
             }
-        } else log.debug("patched {d} call sites", .{i});
+        }
     }
 }
 
@@ -136,19 +164,22 @@ fn insert(l: *Linker, gpa: *Allocator, module: u16, obj: Object) !void {
         };
     }
 
-    // fill the procedure map
-    const adjacent = obj.adjacent.values();
-    for (obj.adjacent.keys()) |key, i| {
-        const proc = try l.procedures.getOrPut(gpa, key);
-        if (proc.found_existing) {
-            if (module < proc.value_ptr.module) {
+    if (false) {
+
+        // fill the procedure map
+        const adjacent = obj.adjacent.values();
+        for (obj.adjacent.keys()) |key, i| {
+            const proc = try l.procedures.getOrPut(gpa, key);
+            if (proc.found_existing) {
+                if (module < proc.value_ptr.module) {
+                    proc.value_ptr.entry = adjacent[i].module_entry;
+                    proc.value_ptr.module = module;
+                }
+            } else {
+                log.debug("new procedure `{s}'", .{key});
                 proc.value_ptr.entry = adjacent[i].module_entry;
                 proc.value_ptr.module = module;
             }
-        } else {
-            log.debug("new procedure {s}", .{key});
-            proc.value_ptr.entry = adjacent[i].module_entry;
-            proc.value_ptr.module = module;
         }
     }
 }

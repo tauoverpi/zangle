@@ -36,6 +36,7 @@ pub const Bytecode = enum(u8) {
     /// Parameters:
     ///   - procedure address
     ///   - module identifier
+    ///   - indentation
     call,
 
     /// Jump to the given address without pushing a return location.
@@ -63,24 +64,15 @@ pub const Bytecode = enum(u8) {
     /// Parameters:
     ///   - procedure address
     ///   - module identifier
-    ///   - shell command (zero terminated)
+    ///   - indentation
+    ///   - shell command
     shell,
-
-    /// Push return location to stack and jump to the given address
-    /// where upon return the output is filtered via the given built-in
-    /// function.
-    ///
-    /// Parameters:
-    ///   - procedure address
-    ///   - module identifier
-    ///   - built-in command (zero terminated)
-    command,
 
     _,
 
     pub fn code(b: Bytecode) u8 {
         const int = @enumToInt(b);
-        assert(int <= @enumToInt(Bytecode.command));
+        assert(int <= @enumToInt(Bytecode.shell));
         return int;
     }
 };
@@ -107,9 +99,16 @@ fn step(r: *Interpreter, gpa: *Allocator, writer: anytype) !bool {
                 r.ip,
                 r.module,
             });
-        } else return false,
+        } else {
+            log.debug("{s: <8} ip: {x: <4} module: {x: <4} ()", .{
+                @tagName(opcode),
+                r.ip,
+                r.module,
+            });
+            return false;
+        },
 
-        .call, .shell, .command => {
+        .call, .shell => {
             const ip = mem.readIntSliceBig(u32, object.bytecode[r.ip .. r.ip + 4]);
             const module = mem.readIntSliceBig(u16, object.bytecode[r.ip + 4 .. r.ip + 6]);
             const indentation = mem.readIntSliceBig(u16, object.bytecode[r.ip + 6 .. r.ip + 8]);
@@ -127,7 +126,7 @@ fn step(r: *Interpreter, gpa: *Allocator, writer: anytype) !bool {
             switch (opcode) {
                 .call => {},
                 // TODO: handle commands
-                .shell, .command => offset += 4,
+                .shell => offset += 4,
                 else => unreachable,
             }
 
@@ -146,8 +145,11 @@ fn step(r: *Interpreter, gpa: *Allocator, writer: anytype) !bool {
         .jmp => {
             const ip = r.ip - 1;
             const module = r.module;
-            r.ip = mem.readIntSliceBig(u32, object.bytecode[r.ip .. r.ip + 4]);
+            const tmp = mem.readIntSliceBig(u32, object.bytecode[r.ip .. r.ip + 4]);
             r.module = mem.readIntSliceBig(u16, object.bytecode[r.ip + 4 .. r.ip + 6]);
+            r.ip = tmp;
+            try writer.writeByte('\n');
+
             log.debug("{s: <8} ip: {x: <4} module: {x: <4} (address: {x} module: {x})", .{
                 @tagName(opcode),
                 ip,
@@ -340,6 +342,45 @@ test "run multiple inputs" {
         .@"example.zig" = 
         \\pub fn main() void {
         \\    std.log.info("Hello, world!", .{});
+        \\}
+        ,
+    });
+}
+
+test "run multiple inputs jmp thread" {
+    try testCompareOutput(testing.allocator, &.{
+        \\    lang: zig esc: <<>> file: example.zig
+        \\    -------------------------------------
+        \\
+        \\    pub fn main() anyerror!void {
+        \\        <<example>>
+        \\    }
+        ,
+        \\    lang: zig esc: none tag: #example
+        \\    ---------------------------------
+        \\
+        \\    std.log.info("Hello, ", .{});
+        ,
+        \\    lang: zig esc: none tag: #example
+        \\    ---------------------------------
+        \\
+        \\    std.log.info("world!", .{});
+        ,
+        \\    lang: zig esc: none tag: #another
+        \\    ---------------------------------
+        \\
+        \\    placeholder
+        ,
+        \\    lang: zig esc: none tag: #example
+        \\    ---------------------------------
+        \\
+        \\    std.log.info("There", .{});
+    }, .{
+        .@"example.zig" = 
+        \\pub fn main() anyerror!void {
+        \\    std.log.info("Hello, ", .{});
+        \\    std.log.info("world!", .{});
+        \\    std.log.info("There", .{});
         \\}
         ,
     });

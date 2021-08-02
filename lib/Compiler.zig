@@ -16,7 +16,6 @@ adjacent: Linker.Object.AdjacentMap = .{},
 files: Linker.Object.FileMap = .{},
 bytecode: ByteList = .{},
 
-/// List of opcodes assembled from the document structure.
 const ByteList = std.ArrayListUnmanaged(u8);
 
 const Token = Tokenizer.Token;
@@ -283,7 +282,7 @@ fn Emit(comptime kind: Interpreter.Bytecode) type {
         .write_nl => u8,
         .write => struct { ptr: u32, len: u16 },
         .call => struct { label: []const u8, indentation: u16 },
-        .shell, .command => struct { label: []const u8, indentation: u16, command: u32 },
+        .shell => struct { label: []const u8, indentation: u16, command: u32 },
         .jmp => @compileError("jmp should only ever be patched!"),
         else => @compileError("invalid instruction"),
     };
@@ -341,7 +340,7 @@ fn emit(p: *Compiler, gpa: *Allocator, comptime kind: Interpreter.Bytecode, valu
             try p.bytecode.appendSlice(gpa, mem.asBytes(&len));
         },
 
-        .shell, .command => {
+        .shell => {
             log.debug("emitting {s}", .{@tagName(kind)});
 
             try p.bytecode.append(gpa, @enumToInt(kind));
@@ -411,7 +410,8 @@ fn parseAndCompileBlock(p: *Compiler, gpa: *Allocator, header: Header) !void {
 
                 if (p.eat(.colon)) |_| {
                     var typ = p.eat(.word) orelse return error.@"Expected block type";
-                    if (p.eat(.l_paren)) |_| {
+                    if (mem.eql(u8, typ, "from")) {
+                        p.expect(.l_paren) catch return error.@"Missing '(' in type cast";
                         typ = p.eat(.word) orelse return error.@"Expected block type in `from` cast";
                         p.expect(.r_paren) catch return error.@"Missing ')' in type cast";
                     }
@@ -419,26 +419,13 @@ fn parseAndCompileBlock(p: *Compiler, gpa: *Allocator, header: Header) !void {
 
                 if (p.eat(.pipe)) |_| {
                     var index = p.it.index;
-                    const com = p.eat(.word) orelse return error.@"Expected a command following `|`";
+                    _ = p.eat(.word) orelse return error.@"Expected a command following `|`";
 
-                    if (mem.eql(u8, com, "shell")) {
-                        p.expect(.space) catch return error.@"Expected a space after `shell`";
-
-                        index = p.it.index;
-                        p.expect(.word) catch return error.@"Expected shell command name";
-
-                        try p.emit(gpa, .shell, .{
-                            .label = ident,
-                            .command = @intCast(u32, index),
-                            .indentation = indentation,
-                        });
-                    } else {
-                        try p.emit(gpa, .command, .{
-                            .label = ident,
-                            .command = @intCast(u23, index),
-                            .indentation = indentation,
-                        });
-                    }
+                    try p.emit(gpa, .shell, .{
+                        .label = ident,
+                        .command = @intCast(u23, index),
+                        .indentation = indentation,
+                    });
                 } else {
                     try p.emit(gpa, .call, .{ .label = ident, .indentation = indentation });
                 }
@@ -452,7 +439,7 @@ fn parseAndCompileBlock(p: *Compiler, gpa: *Allocator, header: Header) !void {
                     => if (!mem.eql(u8, end.slice(p.it.bytes), esc[len .. len + len])) {
                         return error.@"Expected closing delimiter to match opening delimiter";
                     },
-                    else => return error.@"invalid close",
+                    else => return error.@"Invalid closing delimiter",
                 }
             },
 
@@ -605,33 +592,6 @@ test "codegen include type" {
     }, p.bytecode.items);
 }
 
-test "codegen include pipe shell" {
-    var p: Compiler = .{ .it = .{ .bytes = "    <<identifier|shell sort>>\n" } };
-    defer p.deinit(testing.allocator);
-    try p.parseAndCompileBlock(testing.allocator, .{
-        .lang = "zig",
-        .esc = "<<>>",
-        .file = null,
-        .tag = "test",
-    });
-
-    const B = Interpreter.Bytecode;
-
-    try testing.expectEqualSlices(u8, &.{
-        // zig fmt: off
-        B.shell.code(),
-        0xff, 0xff, 0xff, 0xff, // offset
-        0xff, 0xff, // module
-        0, 0, // indentation
-        0, 0, 0, 23, // command
-
-        B.ret.code(),
-        0xff, 0xff, 0xff, 0xff, // offset
-        0xff, 0xff, // module
-        // zig fmt: on
-    }, p.bytecode.items);
-}
-
 test "codegen include pipe" {
     var p: Compiler = .{ .it = .{ .bytes = "    <<identifier|escape>>\n" } };
     defer p.deinit(testing.allocator);
@@ -646,7 +606,7 @@ test "codegen include pipe" {
 
     try testing.expectEqualSlices(u8, &.{
         // zig fmt: off
-        B.command.code(),
+        B.shell.code(),
         0xff, 0xff, 0xff, 0xff, // offset
         0xff, 0xff, // module
         0, 0, // indentation
