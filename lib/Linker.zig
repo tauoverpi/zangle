@@ -163,25 +163,6 @@ fn insert(l: *Linker, gpa: *Allocator, module: u16, obj: Object) !void {
             .module = module,
         };
     }
-
-    if (false) {
-
-        // fill the procedure map
-        const adjacent = obj.adjacent.values();
-        for (obj.adjacent.keys()) |key, i| {
-            const proc = try l.procedures.getOrPut(gpa, key);
-            if (proc.found_existing) {
-                if (module < proc.value_ptr.module) {
-                    proc.value_ptr.entry = adjacent[i].module_entry;
-                    proc.value_ptr.module = module;
-                }
-            } else {
-                log.debug("new procedure `{s}'", .{key});
-                proc.value_ptr.entry = adjacent[i].module_entry;
-                proc.value_ptr.module = module;
-            }
-        }
-    }
 }
 
 /// Remove an entry from the linker object table.
