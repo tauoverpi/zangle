@@ -11,8 +11,8 @@ const Linker = @import("Linker.zig");
 const Compiler = @import("Compiler.zig");
 const Allocator = std.mem.Allocator;
 
-ip: u32,
-module: u16,
+ip: u32 = 0,
+module: u16 = 1,
 stack: ReturnStack = .{},
 linker: Linker,
 delay_indent: bool = true,
@@ -79,6 +79,18 @@ pub const Bytecode = enum(u8) {
 
 pub fn deinit(r: *Interpreter, gpa: *Allocator) void {
     r.stack.deinit(gpa);
+}
+
+pub fn call(r: *Interpreter, gpa: *Allocator, file_or_tag: []const u8, writer: anytype) !void {
+    if (r.linker.files.get(file_or_tag)) |proc| {
+        r.ip = proc.entry;
+        r.module = proc.module;
+    } else if (r.linker.procedures.get(file_or_tag)) |proc| {
+        r.ip = proc.entry;
+        r.module = proc.module;
+    } else return error.@"Method not found";
+
+    while (try r.step(gpa, writer)) {}
 }
 
 fn step(r: *Interpreter, gpa: *Allocator, writer: anytype) !bool {
@@ -196,8 +208,6 @@ fn step(r: *Interpreter, gpa: *Allocator, writer: anytype) !bool {
     return true;
 }
 
-// fn call(r: *Interpreter, tag: []const u8, writer: anytype) !void {}
-
 fn testCompareOutput(gpa: *Allocator, inputs: []const []const u8, expected: anytype) !void {
     var l: Linker = .{};
     defer l.deinit(gpa);
@@ -209,7 +219,7 @@ fn testCompareOutput(gpa: *Allocator, inputs: []const []const u8, expected: anyt
     }
     try l.link(gpa);
 
-    var r: Interpreter = .{ .linker = l, .ip = 0, .module = 1 };
+    var r: Interpreter = .{ .linker = l };
     defer r.deinit(gpa);
 
     inline for (meta.fields(@TypeOf(expected))) |field| {
@@ -381,6 +391,34 @@ test "run multiple inputs jmp thread" {
         \\    std.log.info("Hello, ", .{});
         \\    std.log.info("world!", .{});
         \\    std.log.info("There", .{});
+        \\}
+        ,
+    });
+}
+
+test "run indent" {
+    try testCompareOutput(testing.allocator, &.{
+        \\    lang: zig esc: <<>> file: example.zig
+        \\    -------------------------------------
+        \\
+        \\    pub fn main() void {
+        \\        _ = <<example>>;
+        \\    }
+        \\
+        \\---
+        \\
+        \\    lang: zig esc: none tag: #example
+        \\    ---------------------------------
+        \\
+        \\    true and
+        \\    false and
+        \\    true
+    }, .{
+        .@"example.zig" = 
+        \\pub fn main() void {
+        \\    _ = true and
+        \\        false and
+        \\        true;
         \\}
         ,
     });

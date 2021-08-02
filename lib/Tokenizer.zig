@@ -211,7 +211,7 @@ pub fn next(it: *Tokenizer) Token {
             },
 
             .unknown => switch (c) {
-                '\n' => {
+                '\n', ' ' => {
                     token.tag = .unknown;
                     break;
                 },
