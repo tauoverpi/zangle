@@ -85,6 +85,8 @@ pub fn deinit(l: *Linker, gpa: *Allocator) void {
 }
 
 pub fn link(l: *Linker, gpa: *Allocator) !void {
+    l.procedures.clearRetainingCapacity();
+    l.files.clearRetainingCapacity();
     for (l.objects.items) |obj, offset| {
         const module = offset + 1;
 
@@ -139,6 +141,18 @@ fn mergeAdjacentBlocks(l: *Linker, gpa: *Allocator) !void {
             }
         }
     }
+
+    var failure = false;
+    for (l.objects.items[0..l.objects.items.len]) |object| {
+        for (object.symbols.keys()) |key| {
+            if (!l.procedures.contains(key)) {
+                failure = true;
+                log.err("undefined symbol `{s}'", .{key});
+            }
+        }
+    }
+
+    if (failure) return error.@"Undefined symbol remains after linking";
 }
 
 fn patchCallSites(l: *Linker) void {
