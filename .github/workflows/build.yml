@@ -30,3 +30,12 @@ jobs:
       - name: Run tests
         run: zig build test
 
+      - name: Build zangle
+        run: zig build -Drelease
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v2.2.2
+        with:
+          name: zangle
+          path: zig-out/bin/zangle
+
