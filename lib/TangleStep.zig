@@ -74,8 +74,7 @@ pub fn getFileSource(self: *TangleStep, path: []const u8) !build.FileSource {
 fn make(step: *Step) !void {
     const self = @fieldParentPtr(TangleStep, "step", step);
 
-    var vm: Interpreter = .{ .linker = .{} };
-    defer vm.linker.deinit(self.builder.allocator);
+    var vm: Interpreter = .{};
     defer vm.deinit(self.builder.allocator);
 
     var hash = std.crypto.hash.blake2.Blake2b384.init(.{});
@@ -101,8 +100,6 @@ fn make(step: *Step) !void {
             );
         }
     }
-
-    defer for (vm.linker.objects.items) |obj| self.builder.allocator.free(obj.text);
 
     try vm.linker.link(self.builder.allocator);
 

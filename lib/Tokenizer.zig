@@ -22,7 +22,7 @@ pub const Token = struct {
         esc,
         line,
         word,
-        tagname,
+        hash,
         colon,
         pipe,
         l_brace = '{',
@@ -50,8 +50,6 @@ const State = enum {
     trivial,
     word,
     unknown,
-    tagname_start,
-    tagname,
 };
 
 const map = std.ComptimeStringMap(Token.Tag, .{
@@ -162,8 +160,9 @@ pub fn next(it: *Tokenizer) Token {
                 },
 
                 '#' => {
-                    token.tag = .unknown;
-                    state = .tagname_start;
+                    token.tag = .hash;
+                    it.index += 1;
+                    break;
                 },
 
                 'a'...'z' => {
@@ -195,19 +194,6 @@ pub fn next(it: *Tokenizer) Token {
                 },
 
                 else => state = .unknown,
-            },
-
-            .tagname_start => switch (c) {
-                'a'...'z' => {
-                    token.tag = .tagname;
-                    state = .tagname;
-                },
-                else => break,
-            },
-
-            .tagname => switch (c) {
-                'a'...'z', '_' => {},
-                else => break,
             },
 
             .unknown => switch (c) {

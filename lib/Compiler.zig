@@ -203,9 +203,12 @@ fn parseHeader(p: *Compiler) !Header {
                 desc.file = p.it.bytes[tag_start..endl.start];
             },
             .tag => {
-                p.expect(.tagname) catch return error.@"Invalid tag name";
-                desc.tag = p.it.bytes[tag_start + 1 .. p.it.index];
-                p.expect(.nl) catch return error.@"Expected a new line following tag";
+                p.expect(.hash) catch return error.@"Invalid tag name";
+                _ = p.scan(.nl) orelse return error.@"Expected a new line following hash '#'";
+                desc.tag = p.it.bytes[tag_start + 1 .. p.it.index - 1];
+                if (mem.indexOfAny(u8, desc.tag.?, "<>{}[]()") != null) {
+                    return error.@"Delimiter characters are not allowed within a tag name";
+                }
             },
             else => return error.@"Expected either `tag:` or `file:`",
         }
@@ -406,9 +409,26 @@ fn parseAndCompileBlock(p: *Compiler, gpa: *Allocator, header: Header) !void {
                 log.debug("begin tag", .{});
                 defer log.debug("end tag", .{});
                 defer sol = p.it.index;
-                const ident = p.eat(.word) orelse return error.@"Expected tag";
 
-                if (p.eat(.colon)) |_| {
+                var colon = false;
+                var pipe = false;
+                var last_token: ?Token = null;
+
+                const start_ident = p.it.index;
+                const end_ident = while (p.next()) |tok| {
+                    switch (tok.tag) {
+                        .nl => return error.@"Missing closing tag",
+                        .colon => colon = true,
+                        .pipe => pipe = true,
+                        .r_paren, .r_brace, .r_angle, .r_bracket => last_token = tok,
+                        else => continue,
+                    }
+                    break tok.start;
+                } else return error.@"Missing closing delimiter";
+
+                const ident = p.it.bytes[start_ident..end_ident];
+
+                if (colon) {
                     var typ = p.eat(.word) orelse return error.@"Expected block type";
                     if (mem.eql(u8, typ, "from")) {
                         p.expect(.l_paren) catch return error.@"Missing '(' in type cast";
@@ -417,7 +437,7 @@ fn parseAndCompileBlock(p: *Compiler, gpa: *Allocator, header: Header) !void {
                     }
                 }
 
-                if (p.eat(.pipe)) |_| {
+                if (pipe or p.eat(.pipe) != null) {
                     var index = p.it.index;
                     _ = p.eat(.word) orelse return error.@"Expected a command following `|`";
 
@@ -430,7 +450,7 @@ fn parseAndCompileBlock(p: *Compiler, gpa: *Allocator, header: Header) !void {
                     try p.emit(gpa, .call, .{ .label = ident, .indentation = indentation });
                 }
 
-                const end = p.next() orelse return error.@"Missing closing delimiter";
+                const end = last_token orelse p.next() orelse return error.@"Missing closing delimiter";
                 switch (end.tag) {
                     .r_paren,
                     .r_brace,

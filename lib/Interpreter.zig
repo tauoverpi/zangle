@@ -14,7 +14,7 @@ const Allocator = std.mem.Allocator;
 ip: u32 = 0,
 module: u16 = 1,
 stack: ReturnStack = .{},
-linker: Linker,
+linker: Linker = .{},
 delay_indent: bool = true,
 
 const ReturnStack = std.ArrayListUnmanaged(Location);
@@ -79,8 +79,9 @@ pub const Bytecode = enum(u8) {
     }
 };
 
-pub fn deinit(r: *Interpreter, gpa: *Allocator) void {
-    r.stack.deinit(gpa);
+pub fn deinit(vm: *Interpreter, gpa: *Allocator) void {
+    vm.stack.deinit(gpa);
+    vm.linker.deinit(gpa);
 }
 
 pub fn call(r: *Interpreter, gpa: *Allocator, file_or_tag: []const u8, writer: anytype) !void {
@@ -162,7 +163,8 @@ fn step(r: *Interpreter, gpa: *Allocator, writer: anytype) !bool {
             const ip = r.ip - 1;
             const module = r.module;
             const tmp = mem.readIntSliceBig(u32, object.bytecode[r.ip .. r.ip + 4]);
-            r.module = mem.readIntSliceBig(u16, object.bytecode[r.ip + 4 .. r.ip + 6]);
+            const tmp_module = mem.readIntSliceBig(u16, object.bytecode[r.ip + 4 .. r.ip + 6]);
+            if (tmp_module > 0) r.module = tmp_module;
             r.ip = tmp;
             try writer.writeByte('\n');
 
@@ -214,7 +216,6 @@ fn step(r: *Interpreter, gpa: *Allocator, writer: anytype) !bool {
 
 fn testCompareOutput(gpa: *Allocator, inputs: []const []const u8, expected: anytype) !void {
     var l: Linker = .{};
-    defer l.deinit(gpa);
 
     for (inputs) |input| {
         var obj = try Compiler.parseAndCompile(gpa, input);
