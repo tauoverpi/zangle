@@ -10,6 +10,7 @@ pub fn build(b: *std.build.Builder) !void {
 
     // Standard release options allow the person running `zig build` to select
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
+    b.setPreferredReleaseMode(.ReleaseSafe);
     const mode = b.standardReleaseOptions();
 
     const tangle = try TangleStep.create(b);
@@ -19,6 +20,8 @@ pub fn build(b: *std.build.Builder) !void {
     tangle_step.dependOn(&tangle.step);
 
     const exe = b.addExecutableSource("zangle", try tangle.getFileSource("main.zig"));
+
+    exe.addPackagePath("zangle", "lib/lib.zig");
     exe.setTarget(target);
     exe.setBuildMode(mode);
     exe.install();
@@ -32,7 +35,17 @@ pub fn build(b: *std.build.Builder) !void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
-    const test_step = b.step("test", "test the app");
+    const test_step = b.step("test", "Test the app");
     const test_cmd = b.addTest("lib/lib.zig");
+    const test_main_cmd = b.addTestSource(try tangle.getFileSource("main.zig"));
     test_step.dependOn(&test_cmd.step);
+    test_step.dependOn(&test_main_cmd.step);
+
+    const web = try TangleStep.create(b);
+    web.output_dir = ".";
+    try web.add("docs/index.md");
+
+    const web_step = b.step("web", "Generate project page");
+    web_step.dependOn(&web.step);
+    _ = try web.getFileSource("index.html");
 }

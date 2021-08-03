@@ -96,6 +96,22 @@ pub fn call(r: *Interpreter, gpa: *Allocator, file_or_tag: []const u8, writer: a
     while (try r.step(gpa, writer)) {}
 }
 
+pub fn init(gpa: *Allocator, source: []const []const u8) !Interpreter {
+    var vm: Interpreter = .{};
+    errdefer vm.deinit(gpa);
+
+    for (source) |input| {
+        var obj = try Compiler.parseAndCompile(gpa, input);
+        errdefer obj.deinit(gpa);
+
+        try vm.linker.objects.append(gpa, obj);
+    }
+
+    try vm.linker.link(gpa);
+
+    return vm;
+}
+
 //// INTERNAL ////
 
 fn step(r: *Interpreter, gpa: *Allocator, writer: anytype) !bool {
