@@ -206,8 +206,8 @@ fn parseHeader(p: *Compiler) !Header {
                 p.expect(.hash) catch return error.@"Invalid tag name";
                 _ = p.scan(.nl) orelse return error.@"Expected a new line following hash '#'";
                 desc.tag = p.it.bytes[tag_start + 1 .. p.it.index - 1];
-                if (mem.indexOfAny(u8, desc.tag.?, "<>{}[]()") != null) {
-                    return error.@"Delimiter characters are not allowed within a tag name";
+                if (mem.indexOfAny(u8, desc.tag.?, "<>{}[]():|") != null) {
+                    return error.@"Disallowed characters within block tag name";
                 }
             },
             else => return error.@"Expected either `tag:` or `file:`",
