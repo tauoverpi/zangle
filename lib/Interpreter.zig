@@ -24,6 +24,8 @@ const Location = struct {
     indentation: u16,
 };
 
+//// PUBLIC ////
+
 pub const Bytecode = enum(u8) {
     //! A module address of 0 indicates that the instruction is to be run in the local
     //! address space rather than that of another module. Thus the first module is 1.
@@ -92,6 +94,8 @@ pub fn call(r: *Interpreter, gpa: *Allocator, file_or_tag: []const u8, writer: a
 
     while (try r.step(gpa, writer)) {}
 }
+
+//// INTERNAL ////
 
 fn step(r: *Interpreter, gpa: *Allocator, writer: anytype) !bool {
     const object = r.linker.objects.items[r.module - 1];

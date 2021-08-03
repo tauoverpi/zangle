@@ -26,8 +26,10 @@ ZANGLE                                                                   example
 --------------------------------------------------------------------------------
 
 
-    lang: zig esc: none file: out/main.zig
-    --------------------------------------
+    lang: zig esc: none file: main.zig
+    ----------------------------------
+
+    const std = @import("std");
 
     pub fn main() anyerror!void {
         std.log.info("Z-angle", .{});

@@ -28,6 +28,8 @@ const Procedure = struct {
     module: u16,
 };
 
+//// PUBLIC ////
+
 pub const ObjectList = std.ArrayListUnmanaged(Object);
 pub const Object = struct {
     /// Map of external symbols
@@ -74,6 +76,14 @@ pub const Object = struct {
     }
 };
 
+pub fn deinit(l: *Linker, gpa: *Allocator) void {
+    l.files.deinit(gpa);
+    l.procedures.deinit(gpa);
+    for (l.objects.items) |*obj| obj.deinit(gpa);
+    l.objects.deinit(gpa);
+    l.* = undefined;
+}
+
 pub fn link(l: *Linker, gpa: *Allocator) !void {
     for (l.objects.items) |obj, offset| {
         const module = offset + 1;
@@ -91,6 +101,8 @@ pub fn link(l: *Linker, gpa: *Allocator) !void {
     try l.mergeAdjacentBlocks(gpa);
     l.patchCallSites();
 }
+
+//// INTERNAL ////
 
 fn mergeAdjacentBlocks(l: *Linker, gpa: *Allocator) !void {
     for (l.objects.items[0..l.objects.items.len]) |*object, offset| {
@@ -168,14 +180,6 @@ fn insert(l: *Linker, gpa: *Allocator, module: u16, obj: Object) !void {
 /// Remove an entry from the linker object table.
 fn remove(l: *Linker, obj: Object) void {
     for (obj.files.keys()) |key| assert(l.files.swapRemove(key));
-}
-
-pub fn deinit(l: *Linker, gpa: *Allocator) void {
-    l.files.deinit(gpa);
-    l.procedures.deinit(gpa);
-    for (l.objects.items) |*obj| obj.deinit(gpa);
-    l.objects.deinit(gpa);
-    l.* = undefined;
 }
 
 test "linker add object" {
