@@ -12,7 +12,7 @@ step: Step,
 builder: *Builder,
 files: FileList,
 sources: SourceList,
-output_dir: []const u8,
+output_dir: ?[]const u8,
 
 const FileList = std.TailQueue(File);
 
@@ -34,7 +34,7 @@ pub fn create(builder: *Builder) !*TangleStep {
         .step = Step.init(.custom, "tangle", builder.allocator, make),
         .files = .{},
         .sources = .{},
-        .output_dir = undefined,
+        .output_dir = null,
     };
 
     return self;
@@ -112,15 +112,15 @@ fn make(step: *Step) !void {
     var basename: [64]u8 = undefined;
     _ = std.fs.base64_encoder.encode(&basename, &digest);
 
-    self.output_dir = try fs.path.join(self.builder.allocator, &.{
+    if (self.output_dir == null) self.output_dir = try fs.path.join(self.builder.allocator, &.{
         self.builder.cache_root,
         "o",
         &basename,
     });
 
-    try std.fs.cwd().makePath(self.output_dir);
+    try std.fs.cwd().makePath(self.output_dir.?);
 
-    var dir = try fs.cwd().openDir(self.output_dir, .{});
+    var dir = try fs.cwd().openDir(self.output_dir.?, .{});
     defer dir.close();
 
     var it = self.sources.first;
@@ -137,7 +137,7 @@ fn make(step: *Step) !void {
 
         node.data.source.path = try fs.path.join(
             self.builder.allocator,
-            &.{ self.output_dir, node.data.path },
+            &.{ self.output_dir.?, node.data.path },
         );
     }
 }
