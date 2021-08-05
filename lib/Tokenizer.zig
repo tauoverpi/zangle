@@ -58,6 +58,7 @@ const map = std.ComptimeStringMap(Token.Tag, .{
     .{ "lang", .lang },
     .{ "file", .file },
     .{ "tag", .tag },
+    .{ "global", .tag },
     .{ "esc", .esc },
     .{ "doctest", .doctest },
 });

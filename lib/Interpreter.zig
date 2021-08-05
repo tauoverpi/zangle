@@ -16,6 +16,7 @@ module: u16 = 1,
 stack: ReturnStack = .{},
 linker: Linker = .{},
 delay_indent: bool = true,
+newline: bool = true,
 
 const ReturnStack = std.ArrayListUnmanaged(Location);
 const Location = struct {
@@ -163,13 +164,19 @@ fn step(r: *Interpreter, gpa: *Allocator, writer: anytype) !bool {
                 else => unreachable,
             }
 
+            const level = if (r.stack.items.len == 0)
+                0
+            else
+                r.stack.items[r.stack.items.len - 1].indentation;
+
             const location: Location = .{
                 .ip = r.ip + offset,
                 .module = r.module,
-                .indentation = indentation,
+                .indentation = indentation + level,
             };
 
-            r.delay_indent = true;
+            if (!r.newline) r.delay_indent = true;
+
             r.ip = ip;
             if (module != 0) r.module = module;
             try r.stack.append(gpa, location);
@@ -201,6 +208,7 @@ fn step(r: *Interpreter, gpa: *Allocator, writer: anytype) !bool {
                 r.module,
                 object.bytecode[r.ip],
             });
+            r.newline = true;
             r.ip += 1;
         },
 
@@ -221,6 +229,7 @@ fn step(r: *Interpreter, gpa: *Allocator, writer: anytype) !bool {
                 object.text[index .. index + len],
             });
 
+            r.newline = false;
             r.ip += 6;
         },
 
@@ -365,8 +374,8 @@ test "run multiple inputs" {
         \\        <<example>>
         \\    }
         ,
-        \\    lang: zig esc: none tag: #example
-        \\    ---------------------------------
+        \\    lang: zig esc: none global: #example
+        \\    ------------------------------------
         \\
         \\    std.log.info("Hello, world!", .{});
     }, .{
@@ -387,23 +396,23 @@ test "run multiple inputs jmp thread" {
         \\        <<example>>
         \\    }
         ,
-        \\    lang: zig esc: none tag: #example
-        \\    ---------------------------------
+        \\    lang: zig esc: none global: #example
+        \\    ------------------------------------
         \\
         \\    std.log.info("Hello, ", .{});
         ,
-        \\    lang: zig esc: none tag: #example
-        \\    ---------------------------------
+        \\    lang: zig esc: none global: #example
+        \\    ------------------------------------
         \\
         \\    std.log.info("world!", .{});
         ,
-        \\    lang: zig esc: none tag: #another
-        \\    ---------------------------------
+        \\    lang: zig esc: none global: #another
+        \\    ------------------------------------
         \\
         \\    placeholder
         ,
-        \\    lang: zig esc: none tag: #example
-        \\    ---------------------------------
+        \\    lang: zig esc: none global: #example
+        \\    ------------------------------------
         \\
         \\    std.log.info("There", .{});
     }, .{

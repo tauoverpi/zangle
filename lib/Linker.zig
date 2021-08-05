@@ -69,7 +69,10 @@ pub const Object = struct {
     pub const Adjacent = struct {
         module_entry: u32,
         module_exit: u32,
+        scope: Scope,
     };
+
+    pub const Scope = enum { local, global };
 
     pub const FileMap = std.StringArrayHashMapUnmanaged(u32);
 

@@ -160,6 +160,7 @@ const Header = struct {
     esc: ?[]const u8 = null,
     file: ?[]const u8 = null,
     tag: ?[]const u8 = null,
+    scope: Linker.Object.Scope = .local,
     special: Special = .none,
 };
 
@@ -210,6 +211,7 @@ fn parseHeader(p: *Compiler) !Header {
                 desc.file = p.it.bytes[tag_start..endl.start];
             },
             .tag => {
+                if (mem.eql(u8, tagfile.slice(p.it.bytes), "global")) desc.scope = .global;
                 p.expect(.hash) catch return error.@"Invalid tag name";
                 _ = p.scan(.nl) orelse return error.@"Expected a new line following hash '#'";
 
@@ -298,8 +300,8 @@ fn Emit(comptime kind: Interpreter.Bytecode) type {
         .ret => void,
         .write_nl => u8,
         .write => struct { ptr: u32, len: u16 },
-        .call => struct { label: []const u8, indentation: u16 },
-        .shell => struct { label: []const u8, indentation: u16, command: u32 },
+        .call => struct { label: []const u8, indentation: u16, scope: Linker.Object.Scope },
+        .shell => struct { label: []const u8, indentation: u16, command: u32, scope: Linker.Object.Scope },
         .jmp => @compileError("jmp should only ever be patched!"),
         else => @compileError("invalid instruction"),
     };
@@ -323,12 +325,14 @@ fn emit(p: *Compiler, gpa: *Allocator, comptime kind: Interpreter.Bytecode, valu
 
             try p.bytecode.append(gpa, @enumToInt(kind));
 
-            const entry = try p.symbols.getOrPut(gpa, value.label);
-            if (!entry.found_existing) {
-                entry.value_ptr.* = .{};
+            if (true or value.scope == .global) {
+                const entry = try p.symbols.getOrPut(gpa, value.label);
+                if (!entry.found_existing) {
+                    entry.value_ptr.* = .{};
+                }
+                log.debug("call to `{s}' from {d}", .{ value.label, p.bytecode.items.len });
+                try entry.value_ptr.locations.append(gpa, @intCast(u32, p.bytecode.items.len));
             }
-            log.debug("call to `{s}' from {d}", .{ value.label, p.bytecode.items.len });
-            try entry.value_ptr.locations.append(gpa, @intCast(u32, p.bytecode.items.len));
 
             try p.bytecode.appendSlice(gpa, &.{
                 0xff, 0xff, 0xff, 0xff, // procedure
@@ -362,9 +366,11 @@ fn emit(p: *Compiler, gpa: *Allocator, comptime kind: Interpreter.Bytecode, valu
 
             try p.bytecode.append(gpa, @enumToInt(kind));
 
-            const entry = try p.symbols.getOrPut(gpa, value.label);
-            if (!entry.found_existing) entry.value_ptr.* = .{};
-            try entry.value_ptr.locations.append(gpa, @intCast(u32, p.bytecode.items.len));
+            if (true or value.scope == .global) {
+                const entry = try p.symbols.getOrPut(gpa, value.label);
+                if (!entry.found_existing) entry.value_ptr.* = .{};
+                try entry.value_ptr.locations.append(gpa, @intCast(u32, p.bytecode.items.len));
+            }
 
             const command = mem.nativeToBig(u32, value.command);
             try p.bytecode.appendSlice(gpa, &.{ 0xff, 0xff, 0xff, 0xff, 0xff, 0xff });
@@ -460,9 +466,14 @@ fn parseAndCompileBlock(p: *Compiler, gpa: *Allocator, header: Header) !void {
                         .label = ident,
                         .command = @intCast(u23, index),
                         .indentation = indentation,
+                        .scope = header.scope,
                     });
                 } else {
-                    try p.emit(gpa, .call, .{ .label = ident, .indentation = indentation });
+                    try p.emit(gpa, .call, .{
+                        .label = ident,
+                        .indentation = indentation,
+                        .scope = header.scope,
+                    });
                 }
 
                 const end = last_token orelse p.next() orelse return error.@"Missing closing delimiter";
@@ -502,10 +513,15 @@ fn parseAndCompileBlock(p: *Compiler, gpa: *Allocator, header: Header) !void {
             entry.value_ptr.* = .{
                 .module_entry = entry_point,
                 .module_exit = tail,
+                .scope = header.scope,
             };
         } else {
             const last_exit = entry.value_ptr.module_exit;
             log.debug("extending procedure with 0x{x}", .{entry_point});
+            switch (entry.value_ptr.scope) {
+                .local => if (header.scope != .local) return error.@"Scope declared as `global` in a local block group",
+                .global => if (header.scope != .global) return error.@"Scope declared as `local` in a global block group",
+            }
 
             // Block merge via threading by writing over the last `ret` instruction with `jmp`
             // and a local address.
