@@ -1,7 +1,7 @@
 ![Zangle logo](assets/svg/zangle.svg?raw=true)
 
 
-ZANGLE                                                                     intro
+Zangle
 ================================================================================
 
 Zangle is a tool for emitting code within markdown code blocks into files that a
@@ -23,11 +23,11 @@ TODO:
 - [ ] File watcher with repl for calling document procedures
 - rest of this list
 
-ZANGLE                                                                   example
+Example
 --------------------------------------------------------------------------------
 
 
-    lang: zig esc: <<>> file: main.zig
+    lang: zig esc: [[]] file: main.zig
     ----------------------------------
 
     const std = @import("std");
@@ -36,6 +36,7 @@ ZANGLE                                                                   example
     const fs = std.fs;
     const io = std.io;
     const os = std.os;
+    const mem = std.mem;
     const log = std.log.scoped(.zangle);
 
     pub const log_level = .info;
@@ -47,7 +48,7 @@ ZANGLE                                                                   example
         const gpa = &instance.allocator;
         _ = gpa;
 
-        const files = <<read file list from stdin and load files>>;
+        const files = [[read file list from stdin and load files]];
         var vm = zangle.Interpreter.init(gpa, files) catch |e| {
             log.err("{s}", .{e});
             os.exit(1);
@@ -56,14 +57,14 @@ ZANGLE                                                                   example
         var dir = fs.cwd();
 
         for (vm.linker.files.keys()) |filename| {
-            <<write file to disk>>
+            [[write file to disk]]
         }
 
         // lack of cleanup is intentional
     }
 
 
-ZANGLE                                                              command-line
+Command-line
 --------------------------------------------------------------------------------
 
 File names are read from stdin.
@@ -93,13 +94,21 @@ Writing files to disk.
     lang: zig esc: none tag: #write file to disk
     --------------------------------------------
 
-    if (fs.path.dirname(filename)) |dirname| {
-        log.info("creating path `{s}'", .{dirname});
+    var tmp: [fs.MAX_PATH_BYTES]u8 = undefined;
+    const path = if (!mem.startsWith(u8, filename, "~/")) filename else blk: {
+        var fba = std.heap.FixedBufferAllocator.init(&tmp);
+        break :blk try fs.path.join(&fba.allocator, &.{
+            os.getenv("HOME") orelse return error.@"unable to find ~/",
+            filename[2..],
+        });
+    };
+
+    if (fs.path.dirname(path)) |dirname| {
         try dir.makePath(dirname);
     }
 
-    log.info("writing file `{s}'", .{filename});
-    var file = try dir.createFile(filename, .{ .truncate = true });
+    log.info("writing file `{s}'", .{path});
+    var file = try dir.createFile(path, .{ .truncate = true });
     defer file.close();
 
     var buffer = io.bufferedWriter(file.writer());
@@ -112,3 +121,45 @@ Writing files to disk.
     try buffer.flush();
 
 
+Node
+================================================================================
+
+
+    lang: js esc: none file: zangle.js
+    ----------------------------------
+
+    const fs = require('fs');
+    const zangle = <<define and create the compiler object>>;
+    const files = fs.readFileSync(0)
+        .split(/\r?\n/)
+        .map(filename => fs.readFileSync(filename));
+
+    let vm = zangle.init(files);
+
+    vm.files().forEach(filename => {
+        fs.writeFile(filename, vm.call(filename), err => {
+            if (err) return console.error(vm.getErrorMsg());
+            console.log("written", filename);
+        });
+    });
+
+TODO notes
+================================================================================
+
+File watcher
+--------------------------------------------------------------------------------
+
+Escape sequences for interactive execution of commands.
+
+| function                | sequence              | reset     |
+| --                      | --                    | --        |
+| declare a scroll region | `ESC [ $from ; $to r` | `ESC [ r` |
+| reset terminal          |                       | `ESC c`   |
+| save cursor             | `ESC 7`               |           |
+| restore cursor          | `ESC 8`               |           |
+
+Having the results printed in the region above the command-line would be a
+nice thing to have for interactive debugging (recompile, call, etc) along
+with observing doctest output. However, changes to the screen would need to
+be atomic so along the lines of `\e[r\e[48;0H\e[2K> call functi\e[1;47r\e[46;0H`
+to update the command-line upon input.

@@ -41,6 +41,9 @@ pub const Object = struct {
     /// Map of file roots
     files: FileMap,
 
+    /// List of documentation tests
+    doctest: []const DocTest,
+
     bytecode: []u8,
 
     text: []const u8,
@@ -50,6 +53,11 @@ pub const Object = struct {
     /// resolved. All locations are relative to the start of the
     /// bytecode stream.
     pub const SymbolMap = std.StringArrayHashMapUnmanaged(SymbolEntry);
+
+    pub const DocTest = struct {
+        entry_point: u32,
+        command: []const u8,
+    };
 
     pub const SymbolEntry = struct {
         locations: SymbolList = .{},
@@ -73,6 +81,7 @@ pub const Object = struct {
         obj.adjacent.deinit(gpa);
         obj.files.deinit(gpa);
         gpa.free(obj.bytecode);
+        gpa.free(obj.doctest);
     }
 };
 

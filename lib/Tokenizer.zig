@@ -25,6 +25,7 @@ pub const Token = struct {
         hash,
         colon,
         pipe,
+        doctest,
         l_brace = '{',
         l_paren = '(',
         l_angle = '<',
@@ -58,6 +59,7 @@ const map = std.ComptimeStringMap(Token.Tag, .{
     .{ "file", .file },
     .{ "tag", .tag },
     .{ "esc", .esc },
+    .{ "doctest", .doctest },
 });
 
 pub fn next(it: *Tokenizer) Token {
@@ -197,7 +199,7 @@ pub fn next(it: *Tokenizer) Token {
             },
 
             .unknown => switch (c) {
-                '\n', ' ' => {
+                '\n', ' ', '{', '[', '<', '(', ')', '>', ']', '}' => {
                     token.tag = .unknown;
                     break;
                 },

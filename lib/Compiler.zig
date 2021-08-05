@@ -15,8 +15,10 @@ symbols: Linker.Object.SymbolMap = .{},
 adjacent: Linker.Object.AdjacentMap = .{},
 files: Linker.Object.FileMap = .{},
 bytecode: ByteList = .{},
+doctest: DocTestList = .{},
 
 const ByteList = std.ArrayListUnmanaged(u8);
+const DocTestList = std.ArrayListUnmanaged(Linker.Object.DocTest);
 
 const Token = Tokenizer.Token;
 
@@ -30,6 +32,7 @@ pub fn deinit(p: *Compiler, gpa: *Allocator) void {
     p.symbols.deinit(gpa);
     p.files.deinit(gpa);
     p.bytecode.deinit(gpa);
+    p.doctest.deinit(gpa);
 }
 
 pub fn parseAndCompile(gpa: *Allocator, text: []const u8) !Linker.Object {
@@ -53,6 +56,7 @@ pub fn parseAndCompile(gpa: *Allocator, text: []const u8) !Linker.Object {
         .files = p.files,
         .bytecode = p.bytecode.toOwnedSlice(gpa),
         .text = text,
+        .doctest = p.doctest.toOwnedSlice(gpa),
     };
 }
 
@@ -156,7 +160,10 @@ const Header = struct {
     esc: ?[]const u8 = null,
     file: ?[]const u8 = null,
     tag: ?[]const u8 = null,
+    special: Special = .none,
 };
+
+const Special = union(enum) { none, example, doctest: []const u8 };
 
 fn parseHeader(p: *Compiler) !Header {
     var desc: Header = .{ .lang = undefined };
@@ -205,16 +212,23 @@ fn parseHeader(p: *Compiler) !Header {
             .tag => {
                 p.expect(.hash) catch return error.@"Invalid tag name";
                 _ = p.scan(.nl) orelse return error.@"Expected a new line following hash '#'";
+
                 desc.tag = p.it.bytes[tag_start + 1 .. p.it.index - 1];
+
                 if (mem.indexOfAny(u8, desc.tag.?, "<>{}[]():|") != null) {
                     return error.@"Disallowed characters within block tag name";
                 }
+            },
+
+            .doctest => {
+                const endl = p.scan(.nl) orelse return error.@"Expected a new line following `doctest`";
+                desc.special = .{ .doctest = p.it.bytes[tag_start..endl.start] };
             },
             else => return error.@"Expected either `tag:` or `file:`",
         }
     } else |_| {
         const skip = p.eat(.word) orelse return error.@"Expected either `example` or `esc:`";
-        if (!mem.eql(u8, skip, "example")) return error.@"Expected `example`";
+        if (!mem.eql(u8, skip, "example")) return error.@"Invalid";
         p.expect(.nl) catch return error.@"Expected a new line after `example`";
     }
 
@@ -367,8 +381,8 @@ fn parseAndCompileBlock(p: *Compiler, gpa: *Allocator, header: Header) !void {
     log.debug("begin code", .{});
     defer log.debug("end code", .{});
 
-    const start = @intCast(u32, p.bytecode.items.len);
-    const is_example_block = header.esc == null and header.file == null and header.tag == null;
+    const entry_point = @intCast(u32, p.bytecode.items.len);
+    const is_example_block = header.special == .example;
     var last_is_newline = false;
     var sol: usize = undefined;
 
@@ -395,10 +409,11 @@ fn parseAndCompileBlock(p: *Compiler, gpa: *Allocator, header: Header) !void {
             .l_paren, .l_brace, .l_angle, .l_bracket => if (!is_example_block and header.esc != null) {
                 const esc = header.esc.?;
                 const len = token.len();
-                const indentation = @intCast(u16, p.it.index - sol) - 2;
 
                 if (len != esc.len / 2) continue;
                 if (!mem.eql(u8, token.slice(p.it.bytes), esc[0..token.len()])) continue;
+
+                const indentation = @intCast(u16, p.it.index - sol) - 2;
                 if (indentation > 0) {
                     try p.emit(gpa, .write, .{
                         .ptr = @intCast(u32, p.it.index) - (indentation + 2),
@@ -483,29 +498,35 @@ fn parseAndCompileBlock(p: *Compiler, gpa: *Allocator, header: Header) !void {
 
         const entry = try p.adjacent.getOrPut(gpa, tag);
         if (!entry.found_existing) {
-            log.debug("new procedure `{s}' at 0x{x}", .{ tag, start });
+            log.debug("new procedure `{s}' at 0x{x}", .{ tag, entry_point });
             entry.value_ptr.* = .{
-                .module_entry = start,
+                .module_entry = entry_point,
                 .module_exit = tail,
             };
         } else {
             const last_exit = entry.value_ptr.module_exit;
-            log.debug("extending procedure with 0x{x}", .{start});
+            log.debug("extending procedure with 0x{x}", .{entry_point});
 
             // Block merge via threading by writing over the last `ret` instruction with `jmp`
             // and a local address.
             p.bytecode.items[last_exit] = Interpreter.Bytecode.jmp.code();
             assert(mem.readIntSliceNative(u32, p.bytecode.items[last_exit + 1 .. last_exit + 5]) == 0xffff_ffff);
-            mem.writeIntSliceBig(u32, p.bytecode.items[last_exit + 1 .. last_exit + 5], start);
+            mem.writeIntSliceBig(u32, p.bytecode.items[last_exit + 1 .. last_exit + 5], entry_point);
             mem.writeIntSliceBig(u16, p.bytecode.items[last_exit + 5 .. last_exit + 7], 0);
 
             entry.value_ptr.module_exit = tail;
         }
     } else if (header.file) |tag| {
-        if ((try p.files.fetchPut(gpa, tag, start)) != null) {
+        if ((try p.files.fetchPut(gpa, tag, entry_point)) != null) {
             return error.@"Duplicate file block during compliation";
         }
         try p.emit(gpa, .ret, {});
+    } else switch (header.special) {
+        .doctest => |command| try p.doctest.append(gpa, .{
+            .entry_point = entry_point,
+            .command = command,
+        }),
+        else => {},
     }
 }
 
