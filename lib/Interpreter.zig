@@ -169,6 +169,11 @@ fn step(r: *Interpreter, gpa: *Allocator, writer: anytype) !bool {
             else
                 r.stack.items[r.stack.items.len - 1].indentation;
 
+            // TODO: check stdlib's hashmap and use that
+            for (r.stack.items) |item| {
+                if (r.ip + offset == item.ip) return error.@"Cyclic references are not alowed";
+            }
+
             const location: Location = .{
                 .ip = r.ip + offset,
                 .module = r.module,
