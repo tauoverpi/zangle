@@ -1,5 +1,4 @@
 const std = @import("std");
-const TangleStep = @import("lib/lib.zig").TangleStep;
 
 pub fn build(b: *std.build.Builder) !void {
     // Standard target options allows the person running `zig build` to choose
@@ -14,7 +13,6 @@ pub fn build(b: *std.build.Builder) !void {
     const mode = b.standardReleaseOptions();
     const exe = b.addExecutable("zangle", "src/main.zig");
 
-    exe.addPackagePath("zangle", "lib/lib.zig");
     exe.setTarget(target);
     exe.setBuildMode(mode);
     exe.install();
@@ -27,4 +25,9 @@ pub fn build(b: *std.build.Builder) !void {
 
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
+
+    const test_cmd = b.addTest("src/main.zig");
+
+    const test_step = b.step("test", "Run unit tests");
+    test_step.dependOn(&test_cmd.step);
 }
