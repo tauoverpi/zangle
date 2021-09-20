@@ -4,6 +4,27 @@ Zangle is a literate programming tool for extracting code fragments from
 markdown and other types of text documents into separate files ready for
 compilation.
 
+As a library
+
+    lang: zig esc: none file: lib/lib.zig
+    -------------------------------------
+
+    pub const Tokenizer = @import("Tokenizer.zig");
+    pub const Parser = @import("Parser.zig");
+    pub const Linker = @import("Linker.zig");
+    pub const Instruction = @import("Instruction.zig");
+    pub const Interpreter = @import("Interpreter.zig");
+
+    test {
+        _ = Tokenizer;
+        _ = Parser;
+        _ = Linker;
+        _ = Instruction;
+        _ = Interpreter;
+    }
+
+As a stand-alone application
+
     lang: zig esc: none tag: #main
     ------------------------------
 
@@ -281,13 +302,18 @@ A trail of newline characters is emitted after the text as specified in the
 
 Instructions
 
-    lang: zig esc: [[]] tag: #bytecode
-    ----------------------------------
+    lang: zig esc: [[]] file: lib/Instruction.zig
+    ---------------------------------------------
+
+    const std = @import("std");
+    const assert = std.debug.assert;
+
+    const Instruction = @This();
 
     opcode: Opcode,
     data: Data,
 
-    pub const List = MultiArrayList(Instruction);
+    pub const List = std.MultiArrayList(Instruction);
     pub const Opcode = enum(u8) {
         ret,
         call,
@@ -516,8 +542,20 @@ Rendering is handled by passing interpreters
 
 <!-- -->
 
-    lang: zig esc: none tag: #interpreter step
-    ------------------------------------------
+    lang: zig esc: [[]] file: lib/Interpreter.zig
+    ---------------------------------------------
+
+    const std = @import("std");
+    const lib = @import("lib.zig");
+    const meta = std.meta;
+    const testing = std.testing;
+
+    const Linker = lib.Linker;
+    const Parser = lib.Parser;
+    const Instruction = lib.Instruction;
+    const HashMap = std.AutoArrayHashMapUnmanaged;
+    const Allocator = std.mem.Allocator;
+    const Interpreter = @This();
 
     linker: Linker = .{},
     module: u16 = 1,
@@ -555,6 +593,8 @@ Rendering is handled by passing interpreters
 
         return true;
     }
+
+    [[interpreter step]]
 
 <!-- -->
 
@@ -716,8 +756,20 @@ Rendering is handled by passing interpreters
 
 # Linker
 
-    lang: zig esc: none tag: #linker
-    --------------------------------
+    lang: zig esc: [[]] file: lib/Linker.zig
+    ----------------------------------------
+
+    const std = @import("std");
+    const lib = @import("lib.zig");
+    const testing = std.testing;
+    const assert = std.debug.assert;
+
+    const Parser = lib.Parser;
+    const Instruction = lib.Instruction;
+    const ArrayList = std.ArrayListUnmanaged;
+    const Allocator = std.mem.Allocator;
+    const StringMap = std.StringArrayHashMapUnmanaged;
+    const Linker = @This();
 
     objects: Object.List = .{},
     generation: u16 = 1,
@@ -769,6 +821,8 @@ Rendering is handled by passing interpreters
             self.files.deinit(gpa);
         }
     };
+
+    [[linker]]
 
 ### Merge adjacent blocks
 
@@ -1037,14 +1091,29 @@ The default syntax consists of blocks indented by 4 spaces.
 
 ## Parser
 
-    lang: zig esc: none tag: #zangle parser
-    ---------------------------------------
+    lang: zig esc: [[]] file: lib/Parser.zig
+    ----------------------------------------
+
+    const std = @import("std");
+    const lib = @import("lib.zig");
+    const mem = std.mem;
+    const testing = std.testing;
+    const assert = std.debug.assert;
+
+    const Tokenizer = lib.Tokenizer;
+    const Linker = lib.Linker;
+    const Allocator = std.mem.Allocator;
+    const Instruction = lib.Instruction;
+    const Parser = @This();
 
     it: Tokenizer,
     obj: Linker.Object,
 
     const Token = Tokenizer.Token;
     const log = std.log.scoped(.parser);
+
+    [[zangle parser primitives]]
+    [[zangle parser]]
 
 ### Token
 
@@ -1092,8 +1161,14 @@ The default syntax consists of blocks indented by 4 spaces.
 
 ### Tokenizer
 
-    lang: zig esc: [[]] tag: #zangle tokenizer
-    ------------------------------------------
+    lang: zig esc: [[]] file: lib/Tokenizer.zig
+    -------------------------------------------
+
+    const std = @import("std");
+    const mem = std.mem;
+    const testing = std.testing;
+
+    const Tokenizer = @This();
 
     bytes: []const u8,
     index: usize = 0,
@@ -2010,6 +2085,7 @@ Pipes pass code blocks through external programs.
     --------------------------------------
 
     const std = @import("std");
+    const lib = @import("lib");
     const mem = std.mem;
     const assert = std.debug.assert;
     const testing = std.testing;
@@ -2021,31 +2097,12 @@ Pipes pass code blocks through external programs.
     const Allocator = std.mem.Allocator;
     const ArrayList = std.ArrayListUnmanaged;
     const HashMap = std.AutoArrayHashMapUnmanaged;
-    const StringMap = std.StringArrayHashMapUnmanaged;
     const MultiArrayList = std.MultiArrayList;
-
-    test { testing.refAllDecls(@This()); }
-
-    const Tokenizer = struct {
-        [[zangle tokenizer]]
-    };
-
-    const Parser = struct {
-        [[zangle parser]]
-        [[zangle parser primitives]]
-    };
-
-    const Linker = struct {
-        [[linker]]
-    };
-
-    const Instruction = struct {
-        [[bytecode]]
-    };
-
-    const Interpreter = struct {
-        [[interpreter step]]
-    };
+    const Tokenizer = lib.Tokenizer;
+    const Parser = lib.Parser;
+    const Linker = lib.Linker;
+    const Instruction = lib.Instruction;
+    const Interpreter = lib.Interpreter;
 
     [[main]]
 
