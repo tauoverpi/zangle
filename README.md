@@ -52,19 +52,25 @@ As a stand-alone application
             } else if (mem.eql(u8, arg, "--omit-trailing-newline")) {
                 omit_trailing_newline = true;
             } else {
+                std.log.info("compiling {s}", .{arg});
                 const text = try fs.cwd().readFileAlloc(gpa, arg, 0x7fff_ffff);
-                const object = try Parser.parse(gpa, text);
+                const object = Parser.parse(gpa, text) catch |e| {
+                    std.log.err("{s}", .{@errorName(e)});
+                    os.exit(1);
+                };
                 vm.linker.objects.append(gpa, object) catch return error.@"Exhausted memory";
             }
         }
 
+        std.log.info("linking...", .{});
         try vm.linker.link(gpa);
 
         for (vm.linker.files.keys()) |key| {
             std.log.debug("writing file: {s}", .{key});
 
             if (key[0] == '/' and !allow_absolute_paths) {
-                return error.@"Absolute paths disabled; use --allow-absolute-paths to enable them.";
+                std.log.err("Absolute paths disabled; use --allow-absolute-paths to enable them.", .{});
+                os.exit(1);
             }
 
             if (fs.path.dirname(key)) |dir| try fs.cwd().makePath(dir);
