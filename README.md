@@ -35,9 +35,16 @@ compilation.
 
     const Options = struct {
         allow_absolute_paths: bool = false,
-        execute_shell_filters: bool = false,
         omit_trailing_newline: bool = false,
+        list_files: bool = false,
+        list_tags: bool = false,
+        calls: []const FileOrTag = &.{},
         command: Command,
+
+        pub const FileOrTag = union(enum) {
+            file: []const u8,
+            tag: []const u8,
+        };
     };
 
     [[command-line parser]]
@@ -56,7 +63,7 @@ compilation.
         var instance = std.heap.GeneralPurposeAllocator(.{}){};
         const gpa = &instance.allocator;
 
-        const options = (try parseCli(gpa, &vm.linker.objects)) orelse return;
+        var options = (try parseCli(gpa, &vm.linker.objects)) orelse return;
 
         const n_objects = vm.linker.objects.items.len;
         const plural: []const u8 = if (n_objects == 1) "object" else "objects";
@@ -72,23 +79,48 @@ compilation.
                 var buffered = io.bufferedWriter(stdout);
                 const writer = buffered.writer();
 
-                for (vm.linker.files.keys()) |path| {
+                if (!options.list_files) options.list_files = !options.list_tags;
+
+                if (options.list_tags) for (vm.linker.procedures.keys()) |path| {
                     try writer.writeAll(path);
                     try writer.writeByte('\n');
-                }
+                };
+
+                if (options.list_files) for (vm.linker.files.keys()) |path| {
+                    try writer.writeAll(path);
+                    try writer.writeByte('\n');
+                };
 
                 try buffered.flush();
+            },
+
+            .call => {
+                var context = FileContext.init(stdout);
+
+                for (options.calls) |call| switch (call) {
+                    .file => |file| {
+                        log.debug("calling file {s}", .{file});
+                        try vm.callFile(gpa, file, *FileContext, &context);
+                        if (!options.omit_trailing_newline) try context.stream.writer().writeByte('\n');
+                    },
+                    .tag => |tag| {
+                        log.debug("calling tag {s}", .{tag});
+                        try vm.call(gpa, tag, *FileContext, &context);
+                    },
+                };
+
+                try context.stream.flush();
             },
 
             .tangle => for (vm.linker.files.keys()) |path| {
                 const file = try createFile(path, options);
                 defer file.close();
 
-                var render = FileContext.init(file.writer());
+                var context = FileContext.init(file.writer());
 
-                try vm.callFile(gpa, path, *FileContext, &render);
-                if (!options.omit_trailing_newline) try render.stream.writer().writeByte('\n');
-                try render.stream.flush();
+                try vm.callFile(gpa, path, *FileContext, &context);
+                if (!options.omit_trailing_newline) try context.stream.writer().writeByte('\n');
+                try context.stream.flush();
             },
         }
     }
@@ -134,24 +166,32 @@ TODO: js example using zangle
         help,
         tangle,
         ls,
+        call,
 
         pub const map = std.ComptimeStringMap(Command, .{
             .{ "help", .help },
             .{ "tangle", .tangle },
             .{ "ls", .ls },
+            .{ "call", .call },
         });
     };
 
     const Flag = enum {
         allow_absolute_paths,
-        execute_shell_filters,
         omit_trailing_newline,
+        file,
+        tag,
+        list_tags,
+        list_files,
         @"--",
 
         pub const map = std.ComptimeStringMap(Flag, .{
             .{ "--allow-absolute-paths", .allow_absolute_paths },
-            .{ "--execute-shell-filters", .execute_shell_filters },
             .{ "--omit-trailing-newline", .omit_trailing_newline },
+            .{ "--file=", .file },
+            .{ "--tag=", .tag },
+            .{ "--list-tags", .list_tags },
+            .{ "--list-files", .list_files },
             .{ "--", .@"--" },
         });
     };
@@ -159,13 +199,22 @@ TODO: js example using zangle
     const tangle_help =
         \\Usage: zangle tangle [options] [files]
         \\
-        \\  --allow-absolute-paths
-        \\  --execute-shell-filters
-        \\  --omit-trailing-newline
+        \\  --allow-absolute-paths   Allow writing file blocks with absolute paths
+        \\  --omit-trailing-newline  Do not print a trailing newline at the end of a file block
     ;
 
     const ls_help =
         \\Usage: zangle ls [files]
+        \\
+        \\  --list-files  (default) List all file output paths in the document
+        \\  --list-tags   List all tags in the document
+    ;
+
+    const call_help =
+        \\Usage: zangle call [options] [files]
+        \\
+        \\  --file=[filepath]  Render file block to stdout
+        \\  --tag=[tagname]    Render tag block to stdout
     ;
 
     const log = std.log;
@@ -173,6 +222,7 @@ TODO: js example using zangle
     fn helpGeneric() void {
         log.info(tangle_help, .{});
         log.info(ls_help, .{});
+        log.info(call_help, .{});
     }
 
     fn help(com: ?Command, name: ?[]const u8) void {
@@ -186,6 +236,7 @@ TODO: js example using zangle
             .help => helpGeneric(),
             .tangle => log.info(tangle_help, .{}),
             .ls => log.info(ls_help, .{}),
+            .call => log.info(call_help, .{}),
         }
     }
 
@@ -214,46 +265,56 @@ TODO: js example using zangle
         }
 
         var interpret_flags_as_files: bool = false;
+        var calls = std.ArrayList(Options.FileOrTag).init(gpa);
 
         options.command = command.?;
 
         for (args[2..]) |arg0| {
             const arg = mem.sliceTo(arg0, 0);
             if (arg.len == 0) return error.@"Zero length argument";
-            switch (options.command) {
-                .help => unreachable,
 
-                .ls => {},
+            if (arg[0] == '-' and !interpret_flags_as_files) {
+                errdefer log.err("I don't know how to parse the given option '{s}'", .{arg});
 
-                .tangle => {
-                    if (arg[0] == '-' and !interpret_flags_as_files) {
-                        errdefer log.err("I don't know how to parse the given option '{s}'", .{arg});
+                log.debug("processing {s} flag '{s}'", .{ @tagName(options.command), arg });
 
-                        const split = mem.indexOfScalar(u8, arg, '=') orelse arg.len;
-                        const flag = Flag.map.get(arg[0..split]) orelse {
-                            return error.@"Unknown option";
-                        };
+                const split = (mem.indexOfScalar(u8, arg, '=') orelse (arg.len - 1)) + 1;
+                const flag = Flag.map.get(arg[0..split]) orelse {
+                    return error.@"Unknown option";
+                };
 
-                        switch (flag) {
-                            .allow_absolute_paths => options.allow_absolute_paths = true,
-                            .execute_shell_filters => options.execute_shell_filters = true,
-                            .omit_trailing_newline => options.omit_trailing_newline = true,
-                            .@"--" => interpret_flags_as_files = true,
-                            // else => return error.@"Unknown command-line flag",
-                        }
+                switch (options.command) {
+                    .help => unreachable,
 
-                        continue;
-                    }
-                },
+                    .ls => switch (flag) {
+                        .list_files => options.list_files = true,
+                        .list_tags => options.list_tags = true,
+                        else => return error.@"Unknown command-line flag",
+                    },
+
+                    .call => switch (flag) {
+                        .file => try calls.append(.{ .file = arg[split..] }),
+                        .tag => try calls.append(.{ .tag = arg[split..] }),
+                        else => return error.@"Unknown command-line flag",
+                    },
+
+                    .tangle => switch (flag) {
+                        .allow_absolute_paths => options.allow_absolute_paths = true,
+                        .omit_trailing_newline => options.omit_trailing_newline = true,
+                        .@"--" => interpret_flags_as_files = true,
+                        else => return error.@"Unknown command-line flag",
+                    },
+                }
+            } else {
+                std.log.info("compiling {s}", .{arg});
+                const text = try fs.cwd().readFileAlloc(gpa, arg, 0x7fff_ffff);
+                const object = try Parser.parse(gpa, text);
+
+                objects.append(gpa, object) catch return error.@"Exhausted memory";
             }
-
-            std.log.info("compiling {s}", .{arg});
-            const text = try fs.cwd().readFileAlloc(gpa, arg, 0x7fff_ffff);
-            const object = try Parser.parse(gpa, text);
-
-            objects.append(gpa, object) catch return error.@"Exhausted memory";
         }
 
+        options.calls = calls.toOwnedSlice();
         return options;
     }
 
