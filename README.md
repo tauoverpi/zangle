@@ -37,6 +37,7 @@ compilation.
         allow_absolute_paths: bool = false,
         execute_shell_filters: bool = false,
         omit_trailing_newline: bool = false,
+        command: Command,
     };
 
     [[command-line parser]]
@@ -64,15 +65,31 @@ compilation.
 
         try vm.linker.link(gpa);
 
-        for (vm.linker.files.keys()) |path| {
-            const file = try createFile(path, options);
-            defer file.close();
+        switch (options.command) {
+            .help => unreachable,
 
-            var render = FileContext.init(file.writer());
+            .ls => {
+                var buffered = io.bufferedWriter(stdout);
+                const writer = buffered.writer();
 
-            try vm.callFile(gpa, path, *FileContext, &render);
-            if (!options.omit_trailing_newline) try render.stream.writer().writeByte('\n');
-            try render.stream.flush();
+                for (vm.linker.files.keys()) |path| {
+                    try writer.writeAll(path);
+                    try writer.writeByte('\n');
+                }
+
+                try buffered.flush();
+            },
+
+            .tangle => for (vm.linker.files.keys()) |path| {
+                const file = try createFile(path, options);
+                defer file.close();
+
+                var render = FileContext.init(file.writer());
+
+                try vm.callFile(gpa, path, *FileContext, &render);
+                if (!options.omit_trailing_newline) try render.stream.writer().writeByte('\n');
+                try render.stream.flush();
+            },
         }
     }
 
@@ -96,6 +113,7 @@ TODO: js example using zangle
     const fs = std.fs;
     const io = std.io;
     const os = std.os;
+    const stdout = io.getStdOut().writer();
 
     const Allocator = std.mem.Allocator;
     const ArrayList = std.ArrayListUnmanaged;
@@ -113,13 +131,14 @@ TODO: js example using zangle
     ---------------------------------------------
 
     const Command = enum {
-        invalid,
         help,
         tangle,
+        ls,
 
         pub const map = std.ComptimeStringMap(Command, .{
             .{ "help", .help },
             .{ "tangle", .tangle },
+            .{ "ls", .ls },
         });
     };
 
@@ -127,11 +146,13 @@ TODO: js example using zangle
         allow_absolute_paths,
         execute_shell_filters,
         omit_trailing_newline,
+        @"--",
 
         pub const map = std.ComptimeStringMap(Flag, .{
             .{ "--allow-absolute-paths", .allow_absolute_paths },
             .{ "--execute-shell-filters", .execute_shell_filters },
             .{ "--omit-trailing-newline", .omit_trailing_newline },
+            .{ "--", .@"--" },
         });
     };
 
@@ -141,25 +162,35 @@ TODO: js example using zangle
         \\  --allow-absolute-paths
         \\  --execute-shell-filters
         \\  --omit-trailing-newline
-        \\
     ;
 
-    const generic_help = tangle_help;
+    const ls_help =
+        \\Usage: zangle ls [files]
+    ;
+
     const log = std.log;
 
-    fn help(com: Command, name: ?[]const u8) void {
-        switch (com) {
-            .help => log.info(generic_help, .{}),
-            .invalid => {
-                log.info(generic_help, .{});
-                log.err("I don't know how to handle the given command '{s}'", .{name.?});
-            },
+    fn helpGeneric() void {
+        log.info(tangle_help, .{});
+        log.info(ls_help, .{});
+    }
+
+    fn help(com: ?Command, name: ?[]const u8) void {
+        const command = com orelse {
+            helpGeneric();
+            log.err("I don't know how to handle the given command '{s}'", .{name.?});
+            return;
+        };
+
+        switch (command) {
+            .help => helpGeneric(),
             .tangle => log.info(tangle_help, .{}),
+            .ls => log.info(ls_help, .{}),
         }
     }
 
     fn parseCli(gpa: *Allocator, objects: *Linker.Object.List) !?Options {
-        var options: Options = .{};
+        var options: Options = .{ .command = undefined };
         const args = os.argv;
 
         if (args.len < 2) {
@@ -168,47 +199,59 @@ TODO: js example using zangle
         }
 
         const command_name = mem.sliceTo(args[1], 0);
-        const command = Command.map.get(command_name) orelse .invalid;
+        const command = Command.map.get(command_name);
 
-        if (args.len < 3 or command == .invalid or command == .help) {
+        if (args.len < 3 or command == null or command.? == .help) {
             help(command, command_name);
-            switch (command) {
-                .help => return null,
-                .invalid => return error.@"Invalid command",
-                else => return error.@"Not enough arguments",
+            if (command) |com| {
+                switch (com) {
+                    .help => return null,
+                    else => return error.@"Not enough arguments",
+                }
+            } else {
+                return error.@"Invalid command";
             }
         }
 
-        switch (command) {
-            .help, .invalid => unreachable,
+        var interpret_flags_as_files: bool = false;
 
-            .tangle => for (args[2..]) |arg0| {
-                const arg = mem.sliceTo(arg0, 0);
-                if (arg.len == 0) continue;
+        options.command = command.?;
 
-                if (arg[0] == '-') {
-                    const split = mem.indexOfScalar(u8, arg, '=') orelse arg.len;
-                    const flag = Flag.map.get(arg[0..split]) orelse {
-                        log.err("unknown option '{s}'", .{arg});
-                        return error.@"Unknown command-line flag";
-                    };
+        for (args[2..]) |arg0| {
+            const arg = mem.sliceTo(arg0, 0);
+            if (arg.len == 0) return error.@"Zero length argument";
+            switch (options.command) {
+                .help => unreachable,
 
-                    switch (flag) {
-                        .allow_absolute_paths => options.allow_absolute_paths = true,
-                        .execute_shell_filters => options.execute_shell_filters = true,
-                        .omit_trailing_newline => options.omit_trailing_newline = true,
+                .ls => {},
+
+                .tangle => {
+                    if (arg[0] == '-' and !interpret_flags_as_files) {
+                        errdefer log.err("I don't know how to parse the given option '{s}'", .{arg});
+
+                        const split = mem.indexOfScalar(u8, arg, '=') orelse arg.len;
+                        const flag = Flag.map.get(arg[0..split]) orelse {
+                            return error.@"Unknown option";
+                        };
+
+                        switch (flag) {
+                            .allow_absolute_paths => options.allow_absolute_paths = true,
+                            .execute_shell_filters => options.execute_shell_filters = true,
+                            .omit_trailing_newline => options.omit_trailing_newline = true,
+                            .@"--" => interpret_flags_as_files = true,
+                            // else => return error.@"Unknown command-line flag",
+                        }
+
+                        continue;
                     }
-                } else {
-                    std.log.info("compiling {s}", .{arg});
-                    const text = try fs.cwd().readFileAlloc(gpa, arg, 0x7fff_ffff);
-                    const object = try Parser.parse(gpa, text);
+                },
+            }
 
-                    objects.append(gpa, object) catch return error.@"Exhausted memory";
-                }
-            } else if (objects.items.len == 0) {
-                help(.tangle, null);
-                return error.@"No input files specified";
-            },
+            std.log.info("compiling {s}", .{arg});
+            const text = try fs.cwd().readFileAlloc(gpa, arg, 0x7fff_ffff);
+            const object = try Parser.parse(gpa, text);
+
+            objects.append(gpa, object) catch return error.@"Exhausted memory";
         }
 
         return options;
