@@ -56,7 +56,18 @@ pub fn main() anyerror!void {
     try vm.linker.link(gpa);
 
     for (vm.linker.files.keys()) |key| {
-        std.log.debug("writing file: {s}", .{key});
+        var filename = key;
+
+        var tmp: [fs.MAX_PATH_BYTES]u8 = undefined;
+        var fba = std.heap.FixedBufferAllocator.init(&tmp);
+        if (mem.startsWith(u8, filename, "~/")) {
+            filename = try fs.path.join(&fba.allocator, &.{
+                os.getenv("HOME") orelse return error.@"unable to find ~/",
+                filename[2..],
+            });
+        }
+
+        std.log.debug("writing file: {s}", .{filename});
 
         if (key[0] == '/' and !allow_absolute_paths) {
             std.log.err("Absolute paths disabled; use --allow-absolute-paths to enable them.", .{});
@@ -75,6 +86,7 @@ pub fn main() anyerror!void {
         try render.stream.flush();
     }
 }
+
 const Render = struct {
     stream: Stream,
 

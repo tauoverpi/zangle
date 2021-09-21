@@ -185,7 +185,7 @@ test "run multiple outputs multiple inputs" {
         \\    [[baz]]
         \\
         \\end
-    ,
+        ,
         \\begin
         \\
         \\    lang: zig esc: [[]] tag: #bar
@@ -194,7 +194,7 @@ test "run multiple outputs multiple inputs" {
         \\    [[baz]][[baz]]
         \\
         \\begin
-    ,
+        ,
         \\end
         \\
         \\    lang: zig esc: none tag: #baz
@@ -208,11 +208,17 @@ test "run multiple outputs multiple inputs" {
         .{ .name = "bar", .text = "abcabc" },
         .{ .name = "foo", .text = "abc" },
     });
-
 }
 pub fn deinit(vm: *Interpreter, gpa: *Allocator) void {
     vm.linker.deinit(gpa);
     vm.stack.deinit(gpa);
+}
+
+fn Child(comptime T: type) type {
+    switch (@typeInfo(T)) {
+        .Pointer => |info| return info.child,
+        else => return T,
+    }
 }
 
 pub fn call(vm: *Interpreter, gpa: *Allocator, symbol: []const u8, comptime T: type, eval: T) !void {
@@ -243,7 +249,7 @@ fn execRet(vm: *Interpreter, comptime T: type, eval: T) bool {
         vm.module = location.value.module;
         vm.indent -= location.value.indent;
 
-        if (@hasDecl(meta.Child(T), "ret")) try eval.ret(vm.ip, vm.module, vm.indent);
+        if (@hasDecl(Child(T), "ret")) try eval.ret(vm.ip, vm.module, vm.indent);
         log.debug("[mod {d} ip {x:0>8}] ret(mod {d}, ip {x:0>8})", .{
             mod,
             ip,
@@ -254,7 +260,7 @@ fn execRet(vm: *Interpreter, comptime T: type, eval: T) bool {
         return true;
     }
 
-    if (@hasDecl(meta.Child(T), "terminate")) try eval.terminate();
+    if (@hasDecl(Child(T), "terminate")) try eval.terminate();
     log.debug("[mod {d} ip {x:0>8}] terminate()", .{
         vm.module,
         vm.ip,
@@ -272,8 +278,8 @@ fn execJmp(vm: *Interpreter, comptime T: type, data: Instruction.Data.Jmp, eval:
 
     vm.ip = data.address;
 
-    if (@hasDecl(meta.Child(T), "jmp")) try eval.jmp(vm.ip, data.address);
-    if (@hasDecl(meta.Child(T), "write")) try eval.write("\n", 0, 0);
+    if (@hasDecl(Child(T), "jmp")) try eval.jmp(vm.ip, data.address);
+    if (@hasDecl(Child(T), "write")) try eval.write("\n", 0, 0);
 
     log.debug("[mod {d} ip {x:0>8}] jmp(mod {d}, address {x:0>8})", .{
         mod,
@@ -305,7 +311,7 @@ fn execCall(vm: *Interpreter, comptime T: type, data: Instruction.Data.Call, gpa
         vm.module = data.module;
     }
 
-    if (@hasDecl(meta.Child(T), "call")) try eval.call(vm.ip, vm.module, vm.indent);
+    if (@hasDecl(Child(T), "call")) try eval.call(vm.ip, vm.module, vm.indent);
     log.debug("[mod {d} ip {x:0>8}] call(mod {d}, ip {x:0>8})", .{
         mod,
         ip - 1,
@@ -320,7 +326,7 @@ fn execShell(
     text: []const u8,
     eval: T,
 ) void {
-    if (@hasDecl(meta.Child(T), "shell")) try eval.shell();
+    if (@hasDecl(Child(T), "shell")) try eval.shell();
     _ = vm;
     _ = data;
     _ = text;
@@ -334,7 +340,7 @@ fn execWrite(
     eval: T,
 ) !void {
     if (vm.should_indent and vm.last_is_newline) {
-        if (@hasDecl(meta.Child(T), "indent")) try eval.indent(vm.indent);
+        if (@hasDecl(Child(T), "indent")) try eval.indent(vm.indent);
         log.debug("[mod {d} ip {x:0>8}] indent(len {d})", .{
             vm.module,
             vm.ip,
@@ -344,8 +350,8 @@ fn execWrite(
         vm.should_indent = true;
     }
 
-    if (@hasDecl(meta.Child(T), "write")) try eval.write(
-        text[data.start..data.start + data.len],
+    if (@hasDecl(Child(T), "write")) try eval.write(
+        text[data.start .. data.start + data.len],
         data.start,
         data.nl,
     );

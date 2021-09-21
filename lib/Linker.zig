@@ -22,7 +22,6 @@ const Procedure = struct {
     module: u16,
 };
 
-
 const log = std.log.scoped(.linker);
 
 pub fn deinit(l: *Linker, gpa: *Allocator) void {
@@ -63,7 +62,7 @@ pub const Object = struct {
 
 fn mergeAdjacent(l: *Linker) void {
     for (l.objects.items) |*obj, module| {
-        log.debug("processing module {d}", .{ module + 1 });
+        log.debug("processing module {d}", .{module + 1});
         const values = obj.adjacent.values();
         for (obj.adjacent.keys()) |key, i| {
             const opcodes = obj.program.items(.opcode);
@@ -77,7 +76,7 @@ fn mergeAdjacent(l: *Linker) void {
                     var last_adj = values[i];
                     var last_obj = obj;
 
-                    for (l.objects.items[module + 1..]) |*next, offset| {
+                    for (l.objects.items[module + 1 ..]) |*next, offset| {
                         if (next.adjacent.get(key)) |current| {
                             const op = last_obj.program.items(.opcode)[last_adj.exit];
                             assert(op == .jmp or op == .ret);
@@ -244,7 +243,6 @@ pub fn link(l: *Linker, gpa: *Allocator) !void {
 
     if (failure) return error.@"Unknown symbol";
 }
-
 
 test "call" {
     var obj = try Parser.parse(testing.allocator,

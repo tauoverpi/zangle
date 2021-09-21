@@ -66,7 +66,18 @@ As a stand-alone application
         try vm.linker.link(gpa);
 
         for (vm.linker.files.keys()) |key| {
-            std.log.debug("writing file: {s}", .{key});
+            var filename = key;
+
+            var tmp: [fs.MAX_PATH_BYTES]u8 = undefined;
+            var fba = std.heap.FixedBufferAllocator.init(&tmp);
+            if (mem.startsWith(u8, filename, "~/")) {
+                filename = try fs.path.join(&fba.allocator, &.{
+                    os.getenv("HOME") orelse return error.@"unable to find ~/",
+                    filename[2..],
+                });
+            }
+
+            std.log.debug("writing file: {s}", .{filename});
 
             if (key[0] == '/' and !allow_absolute_paths) {
                 std.log.err("Absolute paths disabled; use --allow-absolute-paths to enable them.", .{});
@@ -85,11 +96,6 @@ As a stand-alone application
             try render.stream.flush();
         }
     }
-
-.
-
-    lang: zig esc: none tag: #main
-    ------------------------------
 
     const Render = struct {
         stream: Stream,
@@ -489,7 +495,7 @@ Rendering is handled by passing interpreters
             \\    [[baz]]
             \\
             \\end
-        ,
+            ,
             \\begin
             \\
             \\    lang: zig esc: [[]] tag: #bar
@@ -498,7 +504,7 @@ Rendering is handled by passing interpreters
             \\    [[baz]][[baz]]
             \\
             \\begin
-        ,
+            ,
             \\end
             \\
             \\    lang: zig esc: none tag: #baz
@@ -512,7 +518,6 @@ Rendering is handled by passing interpreters
             .{ .name = "bar", .text = "abcabc" },
             .{ .name = "foo", .text = "abc" },
         });
-
     }
 
 
@@ -524,6 +529,13 @@ Rendering is handled by passing interpreters
     pub fn deinit(vm: *Interpreter, gpa: *Allocator) void {
         vm.linker.deinit(gpa);
         vm.stack.deinit(gpa);
+    }
+
+    fn Child(comptime T: type) type {
+        switch (@typeInfo(T)) {
+            .Pointer => |info| return info.child,
+            else => return T,
+        }
     }
 
     pub fn call(vm: *Interpreter, gpa: *Allocator, symbol: []const u8, comptime T: type, eval: T) !void {
@@ -616,7 +628,7 @@ Rendering is handled by passing interpreters
             vm.module = location.value.module;
             vm.indent -= location.value.indent;
 
-            if (@hasDecl(meta.Child(T), "ret")) try eval.ret(vm.ip, vm.module, vm.indent);
+            if (@hasDecl(Child(T), "ret")) try eval.ret(vm.ip, vm.module, vm.indent);
             log.debug("[mod {d} ip {x:0>8}] ret(mod {d}, ip {x:0>8})", .{
                 mod,
                 ip,
@@ -627,7 +639,7 @@ Rendering is handled by passing interpreters
             return true;
         }
 
-        if (@hasDecl(meta.Child(T), "terminate")) try eval.terminate();
+        if (@hasDecl(Child(T), "terminate")) try eval.terminate();
         log.debug("[mod {d} ip {x:0>8}] terminate()", .{
             vm.module,
             vm.ip,
@@ -651,8 +663,8 @@ Rendering is handled by passing interpreters
 
         vm.ip = data.address;
 
-        if (@hasDecl(meta.Child(T), "jmp")) try eval.jmp(vm.ip, data.address);
-        if (@hasDecl(meta.Child(T), "write")) try eval.write("\n", 0, 0);
+        if (@hasDecl(Child(T), "jmp")) try eval.jmp(vm.ip, data.address);
+        if (@hasDecl(Child(T), "write")) try eval.write("\n", 0, 0);
 
         log.debug("[mod {d} ip {x:0>8}] jmp(mod {d}, address {x:0>8})", .{
             mod,
@@ -690,7 +702,7 @@ Rendering is handled by passing interpreters
             vm.module = data.module;
         }
 
-        if (@hasDecl(meta.Child(T), "call")) try eval.call(vm.ip, vm.module, vm.indent);
+        if (@hasDecl(Child(T), "call")) try eval.call(vm.ip, vm.module, vm.indent);
         log.debug("[mod {d} ip {x:0>8}] call(mod {d}, ip {x:0>8})", .{
             mod,
             ip - 1,
@@ -711,7 +723,7 @@ Rendering is handled by passing interpreters
         text: []const u8,
         eval: T,
     ) void {
-        if (@hasDecl(meta.Child(T), "shell")) try eval.shell();
+        if (@hasDecl(Child(T), "shell")) try eval.shell();
         _ = vm;
         _ = data;
         _ = text;
@@ -731,7 +743,7 @@ Rendering is handled by passing interpreters
         eval: T,
     ) !void {
         if (vm.should_indent and vm.last_is_newline) {
-            if (@hasDecl(meta.Child(T), "indent")) try eval.indent(vm.indent);
+            if (@hasDecl(Child(T), "indent")) try eval.indent(vm.indent);
             log.debug("[mod {d} ip {x:0>8}] indent(len {d})", .{
                 vm.module,
                 vm.ip,
@@ -741,8 +753,8 @@ Rendering is handled by passing interpreters
             vm.should_indent = true;
         }
 
-        if (@hasDecl(meta.Child(T), "write")) try eval.write(
-            text[data.start..data.start + data.len],
+        if (@hasDecl(Child(T), "write")) try eval.write(
+            text[data.start .. data.start + data.len],
             data.start,
             data.nl,
         );
@@ -788,7 +800,6 @@ Rendering is handled by passing interpreters
         entry: u32,
         module: u16,
     };
-
 
     const log = std.log.scoped(.linker);
 
@@ -839,7 +850,7 @@ TODO: short-circuit on non local module end
 
     fn mergeAdjacent(l: *Linker) void {
         for (l.objects.items) |*obj, module| {
-            log.debug("processing module {d}", .{ module + 1 });
+            log.debug("processing module {d}", .{module + 1});
             const values = obj.adjacent.values();
             for (obj.adjacent.keys()) |key, i| {
                 const opcodes = obj.program.items(.opcode);
@@ -853,7 +864,7 @@ TODO: short-circuit on non local module end
                         var last_adj = values[i];
                         var last_obj = obj;
 
-                        for (l.objects.items[module + 1..]) |*next, offset| {
+                        for (l.objects.items[module + 1 ..]) |*next, offset| {
                             if (next.adjacent.get(key)) |current| {
                                 const op = last_obj.program.items(.opcode)[last_adj.exit];
                                 assert(op == .jmp or op == .ret);
@@ -1045,7 +1056,6 @@ TODO: short-circuit on non local module end
         if (failure) return error.@"Unknown symbol";
     }
 
-
     test "call" {
         var obj = try Parser.parse(testing.allocator,
             \\
@@ -1143,15 +1153,15 @@ The default syntax consists of blocks indented by 4 spaces.
             pipe = '|',
             colon = ':',
 
-            l_angle   = '<',
-            l_brace   = '{',
+            l_angle = '<',
+            l_brace = '{',
             l_bracket = '[',
-            l_paren   = '(',
+            l_paren = '(',
 
-            r_angle   = '>',
-            r_brace   = '}',
+            r_angle = '>',
+            r_brace = '}',
             r_bracket = ']',
-            r_paren   = ')',
+            r_paren = ')',
 
             unknown,
         };
@@ -1240,7 +1250,7 @@ Whitespace of the same type is consumed as a single token.
         try testTokenize("\n", &.{.nl});
         try testTokenize(" ", &.{.space});
         try testTokenize("\n\n\n\n\n", &.{.nl});
-        try testTokenize("\n\n     \n\n\n", &.{.nl, .space, .nl});
+        try testTokenize("\n\n     \n\n\n", &.{ .nl, .space, .nl });
     }
 
 #### Header
@@ -1285,8 +1295,8 @@ Whitespace of the same type is consumed as a single token.
         try testTokenize("#", &.{.hash});
         try testTokenize(":", &.{.colon});
         try testTokenize("-----------------", &.{.line});
-        try testTokenize("###", &.{.hash, .hash, .hash});
-        try testTokenize(":::", &.{.colon, .colon, .colon});
+        try testTokenize("###", &.{ .hash, .hash, .hash });
+        try testTokenize(":::", &.{ .colon, .colon, .colon });
     }
 
 #### Include
@@ -1318,7 +1328,7 @@ Whitespace of the same type is consumed as a single token.
 
     test "tokenize include" {
         try testTokenize("|", &.{.pipe});
-        try testTokenize("|||", &.{.pipe, .pipe, .pipe});
+        try testTokenize("|||", &.{ .pipe, .pipe, .pipe });
     }
 
 #### Unknown
@@ -1373,7 +1383,7 @@ start at the end. This allows the user to click through to the next block.
         pub const Type = enum { file, tag };
     };
 
-    const ParseHeaderError = error {
+    const ParseHeaderError = error{
         @"Expected a space between 'lang:' and the language name",
         @"Expected a space after the language name",
         @"Expected a space between 'esc:' and the delimiter specification",

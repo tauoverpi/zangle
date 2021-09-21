@@ -26,15 +26,15 @@ pub const Token = struct {
         pipe = '|',
         colon = ':',
 
-        l_angle   = '<',
-        l_brace   = '{',
+        l_angle = '<',
+        l_brace = '{',
         l_bracket = '[',
-        l_paren   = '(',
+        l_paren = '(',
 
-        r_angle   = '>',
-        r_brace   = '}',
+        r_angle = '>',
+        r_brace = '}',
         r_bracket = ']',
-        r_paren   = ')',
+        r_paren = ')',
 
         unknown,
     };
@@ -125,19 +125,19 @@ test "tokenize whitespace" {
     try testTokenize("\n", &.{.nl});
     try testTokenize(" ", &.{.space});
     try testTokenize("\n\n\n\n\n", &.{.nl});
-    try testTokenize("\n\n     \n\n\n", &.{.nl, .space, .nl});
+    try testTokenize("\n\n     \n\n\n", &.{ .nl, .space, .nl });
 }
 test "tokenize header" {
     try testTokenize("-", &.{.line});
     try testTokenize("#", &.{.hash});
     try testTokenize(":", &.{.colon});
     try testTokenize("-----------------", &.{.line});
-    try testTokenize("###", &.{.hash, .hash, .hash});
-    try testTokenize(":::", &.{.colon, .colon, .colon});
+    try testTokenize("###", &.{ .hash, .hash, .hash });
+    try testTokenize(":::", &.{ .colon, .colon, .colon });
 }
 test "tokenize include" {
     try testTokenize("|", &.{.pipe});
-    try testTokenize("|||", &.{.pipe, .pipe, .pipe});
+    try testTokenize("|||", &.{ .pipe, .pipe, .pipe });
 }
 test "tokenize unknown" {
     try testTokenize("/file.example/path/../__", &.{.unknown});

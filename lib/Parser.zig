@@ -159,7 +159,7 @@ const Header = struct {
     pub const Type = enum { file, tag };
 };
 
-const ParseHeaderError = error {
+const ParseHeaderError = error{
     @"Expected a space between 'lang:' and the language name",
     @"Expected a space after the language name",
     @"Expected a space between 'esc:' and the delimiter specification",

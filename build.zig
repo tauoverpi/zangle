@@ -13,10 +13,19 @@ pub fn build(b: *std.build.Builder) !void {
     const mode = b.standardReleaseOptions();
     const exe = b.addExecutable("zangle", "src/main.zig");
 
+    const fmt_check_step = &b.addSystemCommand(&.{ "zig", "fmt", "--check", "--ast-check", "src", "lib" }).step;
+
     exe.addPackagePath("lib", "lib/lib.zig");
+    exe.step.dependOn(fmt_check_step);
     exe.setTarget(target);
     exe.setBuildMode(mode);
     exe.install();
+
+    const wa = b.addSharedLibrary("zangle", "lib/wasm.zig", .unversioned);
+    wa.step.dependOn(fmt_check_step);
+    wa.setTarget(.{ .cpu_arch = .wasm32, .os_tag = .freestanding });
+    wa.setBuildMode(mode);
+    wa.install();
 
     const run_cmd = exe.run();
     run_cmd.step.dependOn(b.getInstallStep());
@@ -30,5 +39,6 @@ pub fn build(b: *std.build.Builder) !void {
     const test_cmd = b.addTest("lib/lib.zig");
 
     const test_step = b.step("test", "Run unit tests");
+    test_step.dependOn(fmt_check_step);
     test_step.dependOn(&test_cmd.step);
 }
