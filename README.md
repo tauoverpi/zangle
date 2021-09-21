@@ -4,7 +4,7 @@ Zangle is a literate programming tool for extracting code fragments from
 markdown and other types of text documents into separate files ready for
 compilation.
 
-As a library
+## As a library
 
     lang: zig esc: none file: lib/lib.zig
     -------------------------------------
@@ -23,103 +23,252 @@ As a library
         _ = Interpreter;
     }
 
-As a stand-alone application
+## As a stand-alone application
 
-    lang: zig esc: none tag: #main
-    ------------------------------
+    lang: zig esc: [[]] file: src/main.zig
+    --------------------------------------
 
-    pub fn main() anyerror!void {
+    const std = @import("std");
+    const lib = @import("lib");
+
+    [[main imports]]
+
+    const Options = struct {
+        allow_absolute_paths: bool = false,
+        execute_shell_filters: bool = false,
+        omit_trailing_newline: bool = false,
+    };
+
+    [[command-line parser]]
+
+    [[file rendering context]]
+
+    pub fn main() void {
+        run() catch |err| {
+            log.err("{s}", .{@errorName(err)});
+            os.exit(1);
+        };
+    }
+
+    pub fn run() !void {
+        var vm: Interpreter = .{};
         var instance = std.heap.GeneralPurposeAllocator(.{}){};
         const gpa = &instance.allocator;
 
-        const args = os.argv;
+        const options = (try parseCli(gpa, &vm.linker.objects)) orelse return;
 
-        var vm: Interpreter = .{};
+        const n_objects = vm.linker.objects.items.len;
+        const plural: []const u8 = if (n_objects == 1) "object" else "objects";
 
-        // options
-        var allow_absolute_paths = false;
-        var allow_shell_filters = false;
-        var omit_trailing_newline = false;
-        // end options
+        log.info("linking {d} {s}...", .{ n_objects, plural });
 
-        for (args[1..]) |arg0| {
-            const arg = mem.sliceTo(arg0, 0);
-
-            if (mem.eql(u8, arg, "--allow-absolute-paths")) {
-                allow_absolute_paths = true;
-            } else if (mem.eql(u8, arg, "--allow-shell-filters")) {
-                allow_shell_filters = true;
-            } else if (mem.eql(u8, arg, "--omit-trailing-newline")) {
-                omit_trailing_newline = true;
-            } else {
-                std.log.info("compiling {s}", .{arg});
-                const text = try fs.cwd().readFileAlloc(gpa, arg, 0x7fff_ffff);
-                const object = Parser.parse(gpa, text) catch |e| {
-                    std.log.err("{s}", .{@errorName(e)});
-                    os.exit(1);
-                };
-                vm.linker.objects.append(gpa, object) catch return error.@"Exhausted memory";
-            }
-        }
-
-        std.log.info("linking...", .{});
         try vm.linker.link(gpa);
 
-        for (vm.linker.files.keys()) |key| {
-            var filename = key;
-
-            var tmp: [fs.MAX_PATH_BYTES]u8 = undefined;
-            var fba = std.heap.FixedBufferAllocator.init(&tmp);
-            if (mem.startsWith(u8, filename, "~/")) {
-                filename = try fs.path.join(&fba.allocator, &.{
-                    os.getenv("HOME") orelse return error.@"unable to find ~/",
-                    filename[2..],
-                });
-            }
-
-            std.log.debug("writing file: {s}", .{filename});
-
-            if (key[0] == '/' and !allow_absolute_paths) {
-                std.log.err("Absolute paths disabled; use --allow-absolute-paths to enable them.", .{});
-                os.exit(1);
-            }
-
-            if (fs.path.dirname(key)) |dir| try fs.cwd().makePath(dir);
-
-            var file = try fs.cwd().createFile(key, .{ .truncate = true });
+        for (vm.linker.files.keys()) |path| {
+            const file = try createFile(path, options);
             defer file.close();
 
-            var render = Render.init(file.writer());
+            var render = FileContext.init(file.writer());
 
-            try vm.callFile(gpa, key, *Render, &render);
-            if (!omit_trailing_newline) try render.stream.writer().writeByte('\n');
+            try vm.callFile(gpa, path, *FileContext, &render);
+            if (!options.omit_trailing_newline) try render.stream.writer().writeByte('\n');
             try render.stream.flush();
         }
     }
 
-    const Render = struct {
+    [[create file with path wrapper]]
+
+## From the web
+
+TODO: js example using zangle
+
+# Command-line interface
+
+## Imports
+
+    lang: zig esc: none tag: #main imports
+    --------------------------------------
+
+    const mem = std.mem;
+    const assert = std.debug.assert;
+    const testing = std.testing;
+    const meta = std.meta;
+    const fs = std.fs;
+    const io = std.io;
+    const os = std.os;
+
+    const Allocator = std.mem.Allocator;
+    const ArrayList = std.ArrayListUnmanaged;
+    const HashMap = std.AutoArrayHashMapUnmanaged;
+    const MultiArrayList = std.MultiArrayList;
+    const Tokenizer = lib.Tokenizer;
+    const Parser = lib.Parser;
+    const Linker = lib.Linker;
+    const Instruction = lib.Instruction;
+    const Interpreter = lib.Interpreter;
+
+## Parsing
+
+    lang: zig esc: none tag: #command-line parser
+    ---------------------------------------------
+
+    const Command = enum {
+        invalid,
+        help,
+        tangle,
+
+        pub const map = std.ComptimeStringMap(Command, .{
+            .{ "help", .help },
+            .{ "tangle", .tangle },
+        });
+    };
+
+    const Flag = enum {
+        allow_absolute_paths,
+        execute_shell_filters,
+        omit_trailing_newline,
+
+        pub const map = std.ComptimeStringMap(Flag, .{
+            .{ "--allow-absolute-paths", .allow_absolute_paths },
+            .{ "--execute-shell-filters", .execute_shell_filters },
+            .{ "--omit-trailing-newline", .omit_trailing_newline },
+        });
+    };
+
+    const tangle_help =
+        \\Usage: zangle tangle [options] [files]
+        \\
+        \\  --allow-absolute-paths
+        \\  --execute-shell-filters
+        \\  --omit-trailing-newline
+        \\
+    ;
+
+    const generic_help = tangle_help;
+    const log = std.log;
+
+    fn help(com: Command, name: ?[]const u8) void {
+        switch (com) {
+            .help => log.info(generic_help, .{}),
+            .invalid => {
+                log.info(generic_help, .{});
+                log.err("I don't know how to handle the given command '{s}'", .{name.?});
+            },
+            .tangle => log.info(tangle_help, .{}),
+        }
+    }
+
+    fn parseCli(gpa: *Allocator, objects: *Linker.Object.List) !?Options {
+        var options: Options = .{};
+        const args = os.argv;
+
+        if (args.len < 2) {
+            help(.help, null);
+            return error.@"Missing command name";
+        }
+
+        const command_name = mem.sliceTo(args[1], 0);
+        const command = Command.map.get(command_name) orelse .invalid;
+
+        if (args.len < 3 or command == .invalid or command == .help) {
+            help(command, command_name);
+            switch (command) {
+                .help => return null,
+                .invalid => return error.@"Invalid command",
+                else => return error.@"Not enough arguments",
+            }
+        }
+
+        switch (command) {
+            .help, .invalid => unreachable,
+
+            .tangle => for (args[2..]) |arg0| {
+                const arg = mem.sliceTo(arg0, 0);
+                if (arg.len == 0) continue;
+
+                if (arg[0] == '-') {
+                    const split = mem.indexOfScalar(u8, arg, '=') orelse arg.len;
+                    const flag = Flag.map.get(arg[0..split]) orelse {
+                        log.err("unknown option '{s}'", .{arg});
+                        return error.@"Unknown command-line flag";
+                    };
+
+                    switch (flag) {
+                        .allow_absolute_paths => options.allow_absolute_paths = true,
+                        .execute_shell_filters => options.execute_shell_filters = true,
+                        .omit_trailing_newline => options.omit_trailing_newline = true,
+                    }
+                } else {
+                    std.log.info("compiling {s}", .{arg});
+                    const text = try fs.cwd().readFileAlloc(gpa, arg, 0x7fff_ffff);
+                    const object = try Parser.parse(gpa, text);
+
+                    objects.append(gpa, object) catch return error.@"Exhausted memory";
+                }
+            } else if (objects.items.len == 0) {
+                help(.tangle, null);
+                return error.@"No input files specified";
+            },
+        }
+
+        return options;
+    }
+
+## Loading files
+
+    lang: zig esc: none tag: #create file with path wrapper
+    -------------------------------------------------------
+
+    fn createFile(path: []const u8, options: Options) !fs.File {
+        var tmp: [fs.MAX_PATH_BYTES]u8 = undefined;
+        var fba = std.heap.FixedBufferAllocator.init(&tmp);
+        var filename = path;
+
+        if (mem.startsWith(u8, filename, "~/")) {
+            filename = try fs.path.join(&fba.allocator, &.{
+                os.getenv("HOME") orelse return error.@"unable to find ~/",
+                filename[2..],
+            });
+        }
+
+        if (path[0] == '/' and !options.allow_absolute_paths) {
+            return error.@"Absolute paths disabled; use --allow-absolute-paths to enable them.";
+        }
+
+        if (fs.path.dirname(path)) |dir| try fs.cwd().makePath(dir);
+
+        log.debug("writing file: {s}", .{filename});
+        return try fs.cwd().createFile(path, .{ .truncate = true });
+    }
+
+## Rendering context
+
+    lang: zig esc: none tag: #file rendering context
+    ------------------------------------------------
+
+    const FileContext = struct {
         stream: Stream,
 
         pub const Stream = io.BufferedWriter(1024, std.fs.File.Writer);
 
-        pub fn init(writer: fs.File.Writer) Render {
+        pub fn init(writer: fs.File.Writer) FileContext {
             return .{ .stream = .{ .unbuffered_writer = writer } };
         }
 
-        pub fn write(self: *Render, text: []const u8, index: u32, nl: u16) !void {
+        pub fn write(self: *FileContext, text: []const u8, index: u32, nl: u16) !void {
             _ = index;
             const writer = self.stream.writer();
             try writer.writeAll(text);
             try writer.writeByteNTimes('\n', nl);
         }
 
-        pub fn indent(self: *Render, len: u16) !void {
+        pub fn indent(self: *FileContext, len: u16) !void {
             const writer = self.stream.writer();
             try writer.writeByteNTimes(' ', len);
         }
     };
 
-From the web
+# WebAssembly interface
 
     lang: zig esc: none file: lib/wasm.zig
     --------------------------------------
@@ -2171,33 +2320,6 @@ Pipes pass code blocks through external programs.
             .exports = &.{"here"},
         });
     }
-
-# K
-
-    lang: zig esc: [[]] file: src/main.zig
-    --------------------------------------
-
-    const std = @import("std");
-    const lib = @import("lib");
-    const mem = std.mem;
-    const assert = std.debug.assert;
-    const testing = std.testing;
-    const meta = std.meta;
-    const fs = std.fs;
-    const io = std.io;
-    const os = std.os;
-
-    const Allocator = std.mem.Allocator;
-    const ArrayList = std.ArrayListUnmanaged;
-    const HashMap = std.AutoArrayHashMapUnmanaged;
-    const MultiArrayList = std.MultiArrayList;
-    const Tokenizer = lib.Tokenizer;
-    const Parser = lib.Parser;
-    const Linker = lib.Linker;
-    const Instruction = lib.Instruction;
-    const Interpreter = lib.Interpreter;
-
-    [[main]]
 
 \begin{comment}
 
