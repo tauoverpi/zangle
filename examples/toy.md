@@ -15,6 +15,14 @@
     #define CONCAT3(X, Y, Z) CONCAT(CONCAT(X, Y), Z)
     #define CONCAT4(X, Y, Z, W) CONCAT(CONCAT(CONCAT(X, Y), Z), W)
 
+    #ifdef _DEBUG
+    #define DBG(scope, fmt, ...) fprintf(stderr, "debug(" scope "): " fmt "\n", __VA_ARGS__)
+    #define ERR(scope, fmt, ...) fprintf(stderr, "error(" scope "): " fmt "\n", __VA_ARGS__)
+    #else
+    #define DBG(scope, fmt, ...)
+    #define ERR(scope, fmt, ...)
+    #endif
+
     #define container_of(ptr, sample, member) \
         (__typeof__(sample))((char*)(ptr)-offsetof(__typeof__(*sample), member))
 
@@ -223,7 +231,7 @@
         } CONCAT(slice_, T); \
         slice_impl_as_bytes(T)
 
-## Optinal
+## Optional
 
     lang: c esc: none tag: #optional implementation
     -----------------------------------------------
@@ -238,7 +246,7 @@
     #define optional_none(T) \
         (optional_t(T))      \
         {                    \
-            .none = 0        \
+            .none = 1        \
         }
     #define optional_impl_t(T) \
         typedef struct {       \
@@ -287,40 +295,44 @@
             self->len = 0;                                          \
         }
 
-    #define arraylist_impl_pop(T)                             \
-        T CONCAT3(arraylist_, T, _pop)(arraylist_t(T) * self) \
-        {                                                     \
-            assert(self->len != 0);                           \
-            self->len -= 1;                                   \
-            return self->ptr[self->len];                      \
+    #define arraylist_impl_pop(T)                                     \
+        T CONCAT3(arraylist_, T, _pop)(arraylist_t(T) * self)         \
+        {                                                             \
+            assert(self->len != 0);                                   \
+            self->len -= 1;                                           \
+            DBG("arraylist", "removed item at index %lu", self->len); \
+            return self->ptr[self->len];                              \
         }
 
-    #define arraylist_impl_append(T)                                            \
-        int CONCAT3(arraylist_, T, _append)(arraylist_t(T) * self, T item)      \
-        {                                                                       \
-            if (self->ptr == NULL) {                                            \
-                assert(self->capacity == 0);                                    \
-                assert(self->len == 0);                                         \
-                self->ptr = calloc(8, sizeof(T));                               \
-                if (self->ptr == NULL) {                                        \
-                    return -1;                                                  \
-                }                                                               \
-                self->capacity = 8;                                             \
-            } else if (self->capacity - self->len == 0) {                       \
-                assert(self->ptr != NULL);                                      \
-                size_t new_capacity = self->capacity / 2 + 8;                   \
-                T* new = realloc(self->ptr, new_capacity * sizeof(T));          \
-                if (new == NULL) {                                              \
-                    return -1;                                                  \
-                }                                                               \
-                memset(new + self->capacity, 0, new_capacity - self->capacity); \
-                self->ptr = new;                                                \
-                self->capacity = new_capacity;                                  \
-            }                                                                   \
-                                                                                \
-            self->ptr[self->len] = item;                                        \
-            self->len += 1;                                                     \
-            return 0;                                                           \
+    #define arraylist_impl_append(T)                                                                                \
+        int CONCAT3(arraylist_, T, _append)(arraylist_t(T) * self, T item)                                          \
+        {                                                                                                           \
+            if (self->ptr == NULL) {                                                                                \
+                assert(self->capacity == 0);                                                                        \
+                assert(self->len == 0);                                                                             \
+                self->ptr = calloc(8, sizeof(T));                                                                   \
+                if (self->ptr == NULL) {                                                                            \
+                    return -1;                                                                                      \
+                }                                                                                                   \
+                self->capacity = 8;                                                                                 \
+                DBG("arraylist", "initialized with capacity %ld", self->capacity);                                  \
+            } else if (self->capacity - self->len == 0) {                                                           \
+                assert(self->ptr != NULL);                                                                          \
+                size_t new_capacity = self->capacity / 2 + 8;                                                       \
+                T* new = realloc(self->ptr, new_capacity * sizeof(T));                                              \
+                if (new == NULL) {                                                                                  \
+                    return -1;                                                                                      \
+                }                                                                                                   \
+                memset(new + self->capacity, 0, new_capacity - self->capacity);                                     \
+                self->ptr = new;                                                                                    \
+                self->capacity = new_capacity;                                                                      \
+                DBG("arraylist", "expanded to capacity %ld, free %ld", self->capacity, self->capacity - self->len); \
+            }                                                                                                       \
+                                                                                                                    \
+            DBG("arraylist", "inserting item at index %ld", self->len);                                             \
+            self->ptr[self->len] = item;                                                                            \
+            self->len += 1;                                                                                         \
+            return 0;                                                                                               \
         }
 
     #define arraylist_impl_t(T)   \
@@ -507,6 +519,18 @@
     ----------------------------------------------
 
     #define hashmap_t(K, V) CONCAT3(hashmap_, K, V)
+    #define hashmap_init(K, V, size)   \
+        CONCAT4(hashmap_, K, V, _init) \
+        (size)
+    #define hashmap_deinit(self, K, V)   \
+        CONCAT4(hashmap_, K, V, _deinit) \
+        (self)
+    #define hashmap_get(self, K, V, key) \
+        CONCAT4(hashmap_, K, V, _get)    \
+        (self, key)
+    #define hashmap_put(self, K, V, key, value) \
+        CONCAT4(hashmap_, K, V, _put)           \
+        (self, key, value)
 
     #ifndef MAX_CUCKOO_RELOCATIONS
     #define MAX_CUCKOO_RELOCATIONS 32
@@ -515,7 +539,40 @@
     #define fingerprint(T, x) fnv1a(uint8_t, slice_as_bytes(T, x))
     #define hash(T, x, capacity) (djb2(T, x) & (capacity - 1))
 
-    // TODO: select an entry and swap
+    #define hashmap_impl_deinit(K, V)                                 \
+        void CONCAT4(hashmap_, K, V, _deinit)(hashmap_t(K, V) * self) \
+        {                                                             \
+            self->capacity = 0;                                       \
+            free(self->slot);                                         \
+            free(self->bucket);                                       \
+            self->slot = NULL;                                        \
+            self->bucket = NULL;                                      \
+        }
+
+    #define hashmap_impl_init(K, V)                                              \
+        optional_t(hashmap_t(K, V)) CONCAT4(hashmap_, K, V, _init)(uint8_t size) \
+        {                                                                        \
+            hashmap_t(K, V) map;                                                 \
+            size_t capacity = ((size_t)2) << size;                               \
+            DBG("hashmap", "initializing hashmap with capacity %ld", capacity);  \
+            map.slot = calloc(capacity, sizeof(uint32_t));                       \
+            if (map.slot == NULL) {                                              \
+                ERR("hashmap", "failed allocating %ld slots", capacity);         \
+                return optional_none(hashmap_t(K, V));                           \
+            }                                                                    \
+                                                                                 \
+            map.bucket = calloc(capacity, sizeof(uint32_t));                     \
+            if (map.bucket == NULL) {                                            \
+                ERR("hashmap", "failed allocating %ld buckets", capacity);       \
+                free(map.slot);                                                  \
+                return optional_none(hashmap_t(K, V));                           \
+            }                                                                    \
+                                                                                 \
+            map.capacity = capacity;                                             \
+                                                                                 \
+            return optional_some(hashmap_t(K, V), map);                          \
+        }
+
     #define hashmap_impl_put(K, V)                                                           \
         int CONCAT4(hashmap_, K, V, _put)(hashmap_t(K, V) * self, K key, V value)            \
         {                                                                                    \
@@ -524,31 +581,54 @@
             slice_t(uint32_t) tmp = { .ptr = &f, .len = 1 };                                 \
             uint32_t i2 = i1 ^ hash(uint8_t, slice_as_bytes(uint32_t, tmp), self->capacity); \
                                                                                              \
-            if (self->slots[i1] == 0) {                                                      \
-                self->slots[i1] = f;                                                         \
-                self->buckets[i1] = value;                                                   \
+            DBG("hashmap", "fingerprint %x (put)", f);                                       \
+            DBG("hashmap", "i1          %x", i1);                                            \
+            DBG("hashmap", "i2          %x", i2);                                            \
+                                                                                             \
+            if (self->slot[i1] == 0) {                                                       \
+                DBG("hashmap", "slot 1 free %x", i1);                                        \
+                self->slot[i1] = f;                                                          \
+                self->bucket[i1] = value;                                                    \
                 return 0;                                                                    \
             }                                                                                \
                                                                                              \
-            if (self->slots[i2] == 0) {                                                      \
-                self->slots[i2] = f;                                                         \
-                self->buckets[i2] = value;                                                   \
+            if (self->slot[i2] == 0) {                                                       \
+                DBG("hashmap", "slot 2 free %x", i2);                                        \
+                self->slot[i2] = f;                                                          \
+                self->bucket[i2] = value;                                                    \
                 return 0;                                                                    \
             }                                                                                \
                                                                                              \
             uint32_t i = f & 1 ? i1 : i2;                                                    \
                                                                                              \
+            DBG("hashmap", "no free slot selecting %x", i);                                  \
+                                                                                             \
+            V v_current = value;                                                             \
+            uint32_t f_current;                                                              \
+                                                                                             \
             for (size_t relo = 0; relo < MAX_CUCKOO_RELOCATIONS; relo++) {                   \
+                V v_tmp = self->bucket[i];                                                   \
+                uint32_t f_tmp = self->slot[i];                                              \
+                                                                                             \
+                DBG("hashmap", "kicking out %x and inserting %x", f_tmp, f_current);         \
+                                                                                             \
+                self->bucket[i] = v_current;                                                 \
+                self->slot[i] = f_current;                                                   \
+                                                                                             \
+                f_current = f_tmp;                                                           \
+                v_current = v_tmp;                                                           \
                                                                                              \
                 i ^= hash(uint8_t, slice_as_bytes(uint32_t, tmp), self->capacity);           \
                                                                                              \
-                if (self->slots[i] == 0) {                                                   \
-                    self->slots[i] = f;                                                      \
-                    self->buckets[i] = value;                                                \
+                if (self->slot[i] == 0) {                                                    \
+                    DBG("hashmap", "empty slot %x found, inserting %x", i, f_current);       \
+                    self->slot[i] = f_current;                                               \
+                    self->bucket[i] = v_current;                                             \
                     return 0;                                                                \
                 }                                                                            \
             }                                                                                \
                                                                                              \
+            ERR("hashmap", "no free slots found, failed inserting %x", f_current);           \
             return -1;                                                                       \
         }
 
@@ -562,14 +642,21 @@
             slice_t(uint32_t) tmp = { .ptr = &f, .len = 1 };                                                     \
             uint32_t i2 = i1 ^ hash(uint8_t, slice_as_bytes(uint32_t, tmp), self->capacity);                     \
                                                                                                                  \
-            if (self->slots[i1] == f) {                                                                          \
-                return optional_some(CONCAT4(hashmap_, K, V, _p), &self->buckets[i1]);                           \
+            DBG("hashmap", "fingerprint %x (get ptr)", f);                                                       \
+            DBG("hashmap", "i1          %x", i1);                                                                \
+            DBG("hashmap", "i2          %x", i2);                                                                \
+                                                                                                                 \
+            if (self->slot[i1] == f) {                                                                           \
+                DBG("hashmap", "found in slot 1 (%x)", i1);                                                      \
+                return optional_some(CONCAT4(hashmap_, K, V, _p), &self->bucket[i1]);                            \
             }                                                                                                    \
                                                                                                                  \
-            if (self->slots[i2] == f) {                                                                          \
-                return optional_some(CONCAT4(hashmap_, K, V, _p), &self->buckets[i2]);                           \
+            if (self->slot[i2] == f) {                                                                           \
+                DBG("hashmap", "found in slot 2 (%x)", i2);                                                      \
+                return optional_some(CONCAT4(hashmap_, K, V, _p), &self->bucket[i2]);                            \
             }                                                                                                    \
                                                                                                                  \
+            DBG("hashmap", "entry %x not found", f);                                                             \
             return optional_none(CONCAT4(hashmap_, K, V, _p));                                                   \
         }
 
@@ -581,14 +668,21 @@
             slice_t(uint32_t) tmp = { .ptr = &f, .len = 1 };                                 \
             uint32_t i2 = i1 ^ hash(uint8_t, slice_as_bytes(uint32_t, tmp), self->capacity); \
                                                                                              \
-            if (self->slots[i1] == f) {                                                      \
-                return optional_some(V, self->buckets[i1]);                                  \
+            DBG("hashmap", "fingerprint %x (get)", f);                                       \
+            DBG("hashmap", "i1          %x", i1);                                            \
+            DBG("hashmap", "i2          %x", i2);                                            \
+                                                                                             \
+            if (self->slot[i1] == f) {                                                       \
+                DBG("hashmap", "found in slot 1 (%x)", i1);                                  \
+                return optional_some(V, self->bucket[i1]);                                   \
             }                                                                                \
                                                                                              \
-            if (self->slots[i2] == f) {                                                      \
-                return optional_some(V, self->buckets[i2]);                                  \
+            if (self->slot[i2] == f) {                                                       \
+                DBG("hashmap", "found in slot 2 (%x)", i2);                                  \
+                return optional_some(V, self->bucket[i2]);                                   \
             }                                                                                \
                                                                                              \
+            DBG("hashmap", "entry %x not found", f);                                         \
             return optional_none(V);                                                         \
         }
 
@@ -600,25 +694,36 @@
             slice_t(uint32_t) tmp = { .ptr = &f, .len = 1 };                                 \
             uint32_t i2 = i1 ^ hash(uint8_t, slice_as_bytes(uint32_t, tmp), self->capacity); \
                                                                                              \
-            if (self->slots[i1] == f) {                                                      \
-                self->slots[i1] = 0;                                                         \
+            DBG("hashmap", "fingerprint %x (remove)", f);                                    \
+            DBG("hashmap", "i1          %x", i1);                                            \
+            DBG("hashmap", "i2          %x", i2);                                            \
+                                                                                             \
+            if (self->slot[i1] == f) {                                                       \
+                DBG("hashmap", "found in slot 1 (%x), removing %x", i1, f);                  \
+                self->slot[i1] = 0;                                                          \
             }                                                                                \
                                                                                              \
-            if (self->slots[i2] == f) {                                                      \
-                self->slots[i2] = 0;                                                         \
+            if (self->slot[i2] == f) {                                                       \
+                DBG("hashmap", "found in slot 2 (%x), removing %x", i2, f);                  \
+                self->slot[i2] = 0;                                                          \
             }                                                                                \
+                                                                                             \
+            DBG("hashmap", "key %x not found", f);                                           \
         }
 
-    #define hashmap_impl_t(K, V)    \
-        typedef struct {            \
-            uint32_t* slots;        \
-            V* buckets;             \
-            size_t capacity;        \
-        } CONCAT3(hashmap_, K, V);  \
-        hashmap_impl_remove(K, V);  \
-        hashmap_impl_get(K, V);     \
-        hashmap_impl_get_ptr(K, V); \
-        hashmap_impl_put(K, V);
+    #define hashmap_impl_t(K, V)                  \
+        typedef struct {                          \
+            uint32_t* slot;                       \
+            V* bucket;                            \
+            size_t capacity;                      \
+        } CONCAT3(hashmap_, K, V);                \
+        hashmap_impl_remove(K, V);                \
+        hashmap_impl_get(K, V);                   \
+        hashmap_impl_get_ptr(K, V);               \
+        hashmap_impl_put(K, V);                   \
+        optional_impl_t(CONCAT3(hashmap_, K, V)); \
+        hashmap_impl_init(K, V);                  \
+        hashmap_impl_deinit(K, V);
 
 <!-- -->
 
@@ -636,8 +741,31 @@
     djb2_impl(uint8_t);
     hashmap_impl_t(slice_t(uint8_t), uint8_t);
 
+    #define string_t slice_t(uint8_t)
+    #define map_t hashmap_t(string_t, uint8_t)
+
     int main(void)
     {
+        optional_t(map_t) map = hashmap_init(string_t, uint8_t, 5);
+        assert(map.none == 0);
+        assert(map.some.capacity != 0);
+        assert(map.some.slot != NULL);
+        assert(map.some.bucket != NULL);
+
+        optional_t(uint8_t) missing = hashmap_get(&map.some, string_t, uint8_t, slice_make_const(uint8_t, "hello"));
+        assert(missing.none == 1);
+
+        assert(hashmap_put(&map.some, string_t, uint8_t, slice_make_const(uint8_t, "hello"), 9) == 0);
+
+        optional_t(uint8_t) result = hashmap_get(&map.some, string_t, uint8_t, slice_make_const(uint8_t, "hello"));
+        assert(result.none == 0);
+        assert(result.some == 9);
+
+        hashmap_deinit(&map.some, string_t, uint8_t);
+        assert(map.some.capacity == 0);
+        assert(map.some.slot == NULL);
+        assert(map.some.bucket == NULL);
+
         return 0;
     }
 
