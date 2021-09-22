@@ -4,6 +4,25 @@ Zangle is a literate programming tool for extracting code fragments from
 markdown and other types of text documents into separate files ready for
 compilation.
 
+NOTE: Currently zangle only supports markdown with a special header on
+indented code blocks.
+
+### Examples
+
+Tangle all files within a document.
+
+    $ rm -rf src lib
+    $ zangle tangle README.md
+    $ tree src lib
+
+List all files and tags in the document.
+
+    $ zangle ls README.md --list-tags --list-files
+
+Render the content of a tag and file to stdout.
+
+    $ zangle call README.md --tag=linker --file=lib/lib.zig
+
 ## As a library
 
     lang: zig esc: none file: lib/lib.zig
