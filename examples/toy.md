@@ -28,6 +28,7 @@
 
     void panic(const char* msg)
     {
+        fputs("Panic! ", stderr);
         fputs(msg, stderr);
         fputs("\n", stderr);
         abort();
@@ -226,9 +227,19 @@
     } token_t;
 
     typedef struct {
-        slice_t(uint8_t) text;
+        text_t text;
         size_t index;
     } tokenizer_t;
+
+    slice_t(uint8_t) token_slice(token_t token, text_t text)
+    {
+        assert(token.start <= token.end);
+        assert(token.end < text.len);
+        text_t copy = text;
+        copy.ptr += token.start;
+        copy.len = token.end - token.start;
+        return copy;
+    }
 
     token_t tokenizer_next(tokenizer_t* self)
     {
@@ -365,14 +376,14 @@
 
 <!-- -->
 
-    lang: c esc: [[]] tag: #doctest parser
-    --------------------------------------
+    lang: c esc: [[]] tag: #doctest tokenizer
+    -----------------------------------------
 
     [[project imports]]
 
     [[data structure library]]
 
-    slice_impl_t(uint8_t);
+    [[project type definitions]]
 
     [[tokenizer]]
 
@@ -421,6 +432,212 @@
         return 0;
     }
 
+<!-- -->
+
+    lang: c esc: none tag: #project type definitions
+    ------------------------------------------------
+
+    slice_impl_t(uint8_t);
+    slice_impl_t(uint32_t);
+    arraylist_impl_t(uint32_t);
+    optional_impl_t(uint32_t);
+    optional_impl_t(arraylist_t(uint32_t));
+    optional_impl_t(slice_t(uint8_t));
+    fnv1a_impl(uint8_t);
+    djb2_impl(uint8_t);
+    hashmap_impl_t(slice_t(uint8_t), uint32_t);
+    hashmap_impl_t(slice_t(uint8_t), arraylist_t(uint32_t));
+
+    #define text_t slice_t(uint8_t)
+    #define location_t arraylist_t(uint32_t)
+    #define labelmap_t hashmap_t(text_t, uint32_t)
+    #define symbolmap_t hashmap_t(text_t, location_t)
+    #define labelmap_contains(MAP, KEY) hashmap_contains(MAP, text_t, uint32_t, KEY)
+    #define labelmap_put(MAP, KEY, VAL) hashmap_put(MAP, text_t, uint32_t, KEY, VAL)
+
+<!-- -->
+
+    lang: c esc: none tag: #parser
+    ------------------------------
+
+    uint8_t mov_symbol_name[3] = "mov";
+
+    typedef struct {
+        symbolmap_t symbols;
+        labelmap_t labels;
+    } object_t;
+    optional_impl_t(object_t);
+
+    int parse(text_t text)
+    {
+        optional_t(labelmap_t) labels = hashmap_init(text_t, uint32_t, 5);
+        optional_t(symbolmap_t) symbols = hashmap_init(text_t, location_t, 5);
+        (void)labels;
+        (void)symbols;
+
+        tokenizer_t it = { .text = text };
+
+        token_t token = tokenizer_next(&it);
+        for (; token.tag != TOKEN_EOF; token = tokenizer_next(&it)) {
+            DBG("parser", "starting with %s", token_tag_t_name[token.tag]);
+
+            switch (token.tag) {
+            case TOKEN_LABEL: {
+                text_t label = token_slice(token, text);
+                if (labelmap_contains(&labels.some, label)) {
+                    panic("duplicate label");
+                }
+
+                if (labelmap_put(&labels.some, label, 0) != 0) {
+                    panic("failed to insert");
+                }
+
+                continue;
+            }
+
+            case TOKEN_WORD: {
+                optional_t(text_t) arg1 = optional_none(text_t);
+                optional_t(text_t) arg2 = optional_none(text_t);
+
+                text_t instr = token_slice(token, text);
+                uint32_t hash = fnv1a(uint8_t, instr);
+
+                int is_memory_reference = 0;
+
+                token = tokenizer_next(&it);
+                DBG("parser", "next token is %s", token_tag_t_name[token.tag]);
+
+                if (token.tag == TOKEN_SPACE) {
+                    DBG("parser", "skipping %s", token_tag_t_name[token.tag]);
+                    token = tokenizer_next(&it);
+                }
+
+                // [register]
+                if (token.tag == TOKEN_L_BRACKET) {
+                    DBG("parser", "arg1 memory reference %x", hash);
+                    is_memory_reference = 1;
+                    token = tokenizer_next(&it);
+                    if (token.tag != TOKEN_WORD) {
+                        panic("TODO: error not a word");
+                    }
+
+                    arg1 = optional_some(text_t, token_slice(token, text));
+
+                    token = tokenizer_next(&it);
+                    if (token.tag != TOKEN_R_BRACKET) {
+                        panic("TODO: error not a ]");
+                    }
+
+                    token = tokenizer_next(&it);
+                    if (token.tag == TOKEN_SPACE) {
+                        token = tokenizer_next(&it);
+                    }
+                } else if (token.tag == TOKEN_WORD) {
+                    DBG("parser", "arg1 register argument %x", hash);
+                    arg1 = optional_some(text_t, token_slice(token, text));
+                    token = tokenizer_next(&it);
+                }
+
+                if (token.tag == TOKEN_COMMA) {
+                    DBG("parser", "binary instruction %x", hash);
+                    token = tokenizer_next(&it);
+
+                    if (token.tag == TOKEN_SPACE) {
+                        token = tokenizer_next(&it);
+                    }
+
+                    // [register]
+                    if (token.tag == TOKEN_L_BRACKET) {
+                        DBG("parser", "arg2 memory reference %x", hash);
+                        if (is_memory_reference) {
+                            panic("TODO: cannot have two memory ref arguments");
+                        }
+
+                        is_memory_reference = 1;
+
+                        token = tokenizer_next(&it);
+                        if (token.tag != TOKEN_WORD) {
+                            panic("TODO: arg2 not a word");
+                        }
+
+                        arg2 = optional_some(text_t, token_slice(token, text));
+
+                        token = tokenizer_next(&it);
+                        if (token.tag != TOKEN_R_BRACKET) {
+                            panic("TODO: arg2 not a ]");
+                        }
+                    } else if (token.tag == TOKEN_WORD) {
+                        DBG("parser", "arg2 register argument %x", hash);
+                        arg2 = optional_some(text_t, token_slice(token, text));
+                        token = tokenizer_next(&it);
+                    }
+                } else {
+                    DBG("parser", "unary instruction %x", hash);
+                }
+
+                switch (hash) {
+                case FNV1A("mov"): {
+                    DBG("parser", "emitting mov %d", 0);
+                    continue;
+                }
+
+                case FNV1A("add"): {
+                    panic("add");
+                }
+
+                case FNV1A("halt"): {
+                    DBG("parser", "emitting halt %d", 0);
+                    continue;
+                }
+
+                default:
+                    panic("TODO: handle unknown instructions");
+                }
+                panic("TODO: more instructions");
+            }
+
+            case TOKEN_SPACE:
+            case TOKEN_NL: {
+                continue;
+            }
+
+            case TOKEN_EOF: {
+                goto parser_finish;
+            }
+
+            default:
+                panic("invalid parser state!");
+            }
+        }
+
+    parser_finish:
+
+        return 0;
+    }
+
+<!-- -->
+
+    lang: c esc: [[]] tag: #doctest parser
+    --------------------------------------
+
+    [[project imports]]
+
+    [[data structure library]]
+
+    [[project type definitions]]
+
+    [[tokenizer]]
+    [[parser]]
+
+    int main(void)
+    {
+        uint8_t program[] = "label:\n"
+                            "    mov eax, ebx\n"
+                            "    halt\n";
+        assert(parse(slice_make_const(uint8_t, program)) == 0);
+        return 0;
+    }
+
 # Data structures
 
     lang: c esc: [[]] tag: #data structure library
@@ -441,6 +658,9 @@
     #define slice_as_bytes(T, slice)  \
         CONCAT3(slice_, T, _as_bytes) \
         (slice)
+    #define slice_eql(T, a, b)   \
+        CONCAT3(slice_, T, _eql) \
+        (a, b)
     #define slice_make_const(T, arr) \
         (slice_t(T))                 \
         {                            \
@@ -457,12 +677,27 @@
             return result;                                               \
         }
 
+    #define slice_impl_eql(T)                                    \
+        int CONCAT3(slice_, T, _eql)(slice_t(T) a, slice_t(T) b) \
+        {                                                        \
+            if (a.len != b.len) {                                \
+                return 0;                                        \
+            }                                                    \
+            for (size_t index = 0; index < a.len; index++) {     \
+                if (a.ptr[index] != b.ptr[index]) {              \
+                    return 0;                                    \
+                }                                                \
+            }                                                    \
+            return 1;                                            \
+        }
+
     #define slice_impl_t(T)  \
         typedef struct {     \
             size_t len;      \
             T* ptr;          \
         } CONCAT(slice_, T); \
-        slice_impl_as_bytes(T)
+        slice_impl_eql(T);   \
+        slice_impl_as_bytes(T);
 
 ## Optional
 
@@ -637,8 +872,21 @@
     lang: c esc: none tag: #fnv1a implementation
     --------------------------------------------
 
-    #define FNV_32_BIT_PRIME 16777619
-    #define FNV_32_BIT_OFFSET 2166136261
+    #define FNV_32_BIT_PRIME (uint32_t)16777619
+    #define FNV_32_BIT_OFFSET (uint32_t)2166136261
+    #define FNV1A_0(BYTE, P) ((uint32_t)((BYTE ^ (P)) * FNV_32_BIT_PRIME))
+    #define FNV1A_2(S, P) (FNV1A_0(S[1], FNV1A_0(S[0], P)))
+    #define FNV1A_4(S, P) (FNV1A_0(S[3], FNV1A_0(S[2], FNV1A_2(S, P))))
+    #define FNV1A_6(S, P) (FNV1A_0(S[5], FNV1A_0(S[4], FNV1A_4(S, P))))
+    #define FNV1A(S)                                                              \
+        ((uint32_t)(sizeof(S) == 1 ? FNV1A_0(S[0], FNV_32_BIT_OFFSET)             \
+                : sizeof(S) == 2   ? FNV1A_0(S[0], FNV_32_BIT_OFFSET)             \
+                : sizeof(S) == 3   ? FNV1A_2(S, FNV_32_BIT_OFFSET)                \
+                : sizeof(S) == 4   ? FNV1A_0(S[2], FNV1A_2(S, FNV_32_BIT_OFFSET)) \
+                : sizeof(S) == 5   ? FNV1A_4(S, FNV_32_BIT_OFFSET)                \
+                : sizeof(S) == 6   ? FNV1A_0(S[4], FNV1A_4(S, FNV_32_BIT_OFFSET)) \
+                : sizeof(S) == 7   ? FNV1A_6(S, FNV_32_BIT_OFFSET)                \
+                                   : -1))
 
     #define fnv1a(T, slice) \
         CONCAT(fnv1a_, T)   \
@@ -700,6 +948,18 @@
         assert(fnv1a(uint8_t, slice_make_const(uint8_t, input[9])) == 0);
         assert(fnv1a(uint8_t, slice_make_const(uint8_t, input[10])) == 0);
         assert(fnv1a(uint8_t, slice_make_const(uint8_t, input[11])) == 0);
+
+        uint8_t a[1] = "a";
+        uint8_t ab[2] = "ab";
+        uint8_t abc[3] = "abc";
+        uint8_t abcd[4] = "abcd";
+        uint8_t abcde[5] = "abcde";
+        assert(fnv1a(uint8_t, slice_make_const(uint8_t, a)) == FNV1A("a"));
+        assert(fnv1a(uint8_t, slice_make_const(uint8_t, ab)) == FNV1A("ab"));
+        assert(fnv1a(uint8_t, slice_make_const(uint8_t, abc)) == FNV1A("abc"));
+        assert(fnv1a(uint8_t, slice_make_const(uint8_t, abcd)) == FNV1A("abcd"));
+        assert(fnv1a(uint8_t, slice_make_const(uint8_t, abcde)) == FNV1A("abcde"));
+
         return 0;
     }
 
@@ -760,6 +1020,9 @@
         (self)
     #define hashmap_get(self, K, V, key) \
         CONCAT4(hashmap_, K, V, _get)    \
+        (self, key)
+    #define hashmap_contains(self, K, V, key) \
+        CONCAT4(hashmap_, K, V, _contains)    \
         (self, key)
     #define hashmap_put(self, K, V, key, value) \
         CONCAT4(hashmap_, K, V, _put)           \
@@ -893,6 +1156,32 @@
             return optional_none(CONCAT4(hashmap_, K, V, _p));                                                   \
         }
 
+    #define hashmap_impl_contains(K, V)                                                      \
+        int CONCAT4(hashmap_, K, V, _contains)(hashmap_t(K, V) * self, K key)                \
+        {                                                                                    \
+            uint32_t f = fingerprint(uint8_t, key);                                          \
+            uint32_t i1 = hash(uint8_t, key, self->capacity);                                \
+            slice_t(uint32_t) tmp = { .ptr = &f, .len = 1 };                                 \
+            uint32_t i2 = i1 ^ hash(uint8_t, slice_as_bytes(uint32_t, tmp), self->capacity); \
+                                                                                             \
+            DBG("hashmap", "fingerprint %x (contains)", f);                                  \
+            DBG("hashmap", "i1          %x", i1);                                            \
+            DBG("hashmap", "i2          %x", i2);                                            \
+                                                                                             \
+            if (self->slot[i1] == f) {                                                       \
+                DBG("hashmap", "found in slot 1 (%x)", i1);                                  \
+                return 1;                                                                    \
+            }                                                                                \
+                                                                                             \
+            if (self->slot[i2] == f) {                                                       \
+                DBG("hashmap", "found in slot 2 (%x)", i2);                                  \
+                return 1;                                                                    \
+            }                                                                                \
+                                                                                             \
+            DBG("hashmap", "entry %x not found", f);                                         \
+            return 0;                                                                        \
+        }
+
     #define hashmap_impl_get(K, V)                                                           \
         optional_t(V) CONCAT4(hashmap_, K, V, _get)(hashmap_t(K, V) * self, K key)           \
         {                                                                                    \
@@ -953,6 +1242,7 @@
         hashmap_impl_remove(K, V);                \
         hashmap_impl_get(K, V);                   \
         hashmap_impl_get_ptr(K, V);               \
+        hashmap_impl_contains(K, V);              \
         hashmap_impl_put(K, V);                   \
         optional_impl_t(CONCAT3(hashmap_, K, V)); \
         hashmap_impl_init(K, V);                  \
