@@ -83,8 +83,8 @@
 
 <!-- -->
 
-    lang: c esc: [[]] tag: #doctest register overlap
-    ------------------------------------------------
+    lang: c esc: [[]] file: doctest/register_overlap.c
+    --------------------------------------------------
 
     [[project imports]]
 
@@ -376,8 +376,8 @@
 
 <!-- -->
 
-    lang: c esc: [[]] tag: #doctest tokenizer
-    -----------------------------------------
+    lang: c esc: [[]] file: doctest/tokenizer.c
+    -------------------------------------------
 
     [[project imports]]
 
@@ -617,8 +617,8 @@
 
 <!-- -->
 
-    lang: c esc: [[]] tag: #doctest parser
-    --------------------------------------
+    lang: c esc: [[]] file: doctest/parser.c
+    ----------------------------------------
 
     [[project imports]]
 
@@ -816,8 +816,8 @@
 
 <!-- -->
 
-    lang: c esc: [[]] tag: #doctest array list append
-    -------------------------------------------------
+    lang: c esc: [[]] file: doctest/array_list_append.c
+    ---------------------------------------------------
 
     [[project imports]]
 
@@ -909,8 +909,8 @@
 
 <!-- -->
 
-    lang: c esc: [[]] tag: #doctest fnv1a
-    -------------------------------------
+    lang: c esc: [[]] file: doctest/fnv1a.c
+    ---------------------------------------
 
     [[project imports]]
 
@@ -989,8 +989,8 @@
 <!-- -->
 
 
-    lang: c esc: [[]] tag: #doctest djb2
-    ------------------------------------
+    lang: c esc: [[]] file: doctest/djb2.c
+    --------------------------------------
 
     [[project imports]]
 
@@ -1250,8 +1250,8 @@
 
 <!-- -->
 
-    lang: c esc: [[]] tag: #doctest hashmap
-    ---------------------------------------
+    lang: c esc: [[]] file: doctest/hashmap.c
+    -----------------------------------------
 
     [[project imports]]
 
