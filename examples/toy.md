@@ -166,12 +166,8 @@
 
 # Parser
 
-    lang: c esc: [[]] tag: #doctest parser
-    --------------------------------------
-
-    [[project imports]]
-
-    [[data structure library]]
+    lang: c esc: none tag: #tokenizer
+    ---------------------------------
 
     typedef enum {
         TOKEN_SPACE,
@@ -181,10 +177,247 @@
         TOKEN_COMMA,
         TOKEN_L_BRACKET,
         TOKEN_R_BRACKET,
+        TOKEN_EOF,
+        TOKEN_COMMENT,
+        TOKEN_HEX_LITERAL,
+        TOKEN_DECIMAL_LITERAL,
+        TOKEN_INVALID,
     } token_tag_t;
+
+    uint8_t* token_tag_t_name[] = {
+        (uint8_t*)&"space",
+        (uint8_t*)&"label",
+        (uint8_t*)&"word",
+        (uint8_t*)&"nl",
+        (uint8_t*)&"comma",
+        (uint8_t*)&"l_bracket",
+        (uint8_t*)&"r_bracket",
+        (uint8_t*)&"eof",
+        (uint8_t*)&"comment",
+        (uint8_t*)&"hex literal",
+        (uint8_t*)&"decimal literal",
+        (uint8_t*)&"invalid",
+    };
+
+    typedef enum {
+        TOKENIZER_START,
+        TOKENIZER_WORD,
+        TOKENIZER_TRIVIAL,
+        TOKENIZER_DIGIT,
+        TOKENIZER_DECIMAL,
+        TOKENIZER_HEX,
+        TOKENIZER_COMMENT,
+    } tokenizer_state_t;
+
+    uint8_t* tokenizer_state_t_name[] = {
+        (uint8_t*)&"start",
+        (uint8_t*)&"word",
+        (uint8_t*)&"trivial",
+        (uint8_t*)&"digit",
+        (uint8_t*)&"decimal",
+        (uint8_t*)&"hex",
+        (uint8_t*)&"comment",
+    };
+
+    typedef struct {
+        token_tag_t tag;
+        size_t start;
+        size_t end;
+    } token_t;
+
+    typedef struct {
+        slice_t(uint8_t) text;
+        size_t index;
+    } tokenizer_t;
+
+    token_t tokenizer_next(tokenizer_t* self)
+    {
+        token_t token;
+        token.tag = TOKEN_EOF;
+        token.start = self->index;
+
+        tokenizer_state_t state = TOKENIZER_START;
+        uint8_t trivial = 0;
+
+        for (; self->index < self->text.len; self->index++) {
+            uint8_t c = self->text.ptr[self->index];
+            if (c == 0) {
+                break;
+            }
+            DBG("tokenizer", "state %s %c", tokenizer_state_t_name[state], c);
+
+    #define range(FROM, TO) (c >= (FROM) && c <= (TO))
+    #define is(CH) (c == (CH))
+
+            switch (state) {
+            case TOKENIZER_START: {
+                if (range('A', 'Z') || range('a', 'z')) {
+                    state = TOKENIZER_WORD;
+                    token.tag = TOKEN_WORD;
+                } else if (range('1', '9')) {
+                    state = TOKENIZER_DECIMAL;
+                    token.tag = TOKEN_DECIMAL_LITERAL;
+                } else if (is('0')) {
+                    state = TOKENIZER_DIGIT;
+                } else if (is('[')) {
+                    token.tag = TOKEN_L_BRACKET;
+                    self->index += 1;
+                    goto tokenizer_finish;
+                } else if (is(']')) {
+                    token.tag = TOKEN_R_BRACKET;
+                    self->index += 1;
+                    goto tokenizer_finish;
+                } else if (is(' ')) {
+                    state = TOKENIZER_TRIVIAL;
+                    trivial = ' ';
+                    token.tag = TOKEN_SPACE;
+                } else if (is(',')) {
+                    token.tag = TOKEN_COMMA;
+                    self->index += 1;
+                    goto tokenizer_finish;
+                } else if (is(';')) {
+                    state = TOKENIZER_COMMENT;
+                    token.tag = TOKEN_COMMENT;
+                } else if (is('\n')) {
+                    state = TOKENIZER_TRIVIAL;
+                    token.tag = TOKEN_NL;
+                } else {
+                    DBG("tokenizer", "invalid byte %d", c);
+                    token.tag = TOKEN_INVALID;
+                    goto tokenizer_finish;
+                }
+                continue;
+            }
+
+            case TOKENIZER_DIGIT: {
+                if (is('x')) {
+                    state = TOKENIZER_HEX;
+                    token.tag = TOKEN_HEX_LITERAL;
+                } else if (range('0', '9')) {
+                    state = TOKENIZER_DECIMAL;
+                    token.tag = TOKEN_DECIMAL_LITERAL;
+                }
+                continue;
+            }
+
+            case TOKENIZER_HEX: {
+                if (range('0', '9') || range('a', 'f') || range('A', 'F')) {
+                    // skip
+                } else {
+                    goto tokenizer_finish;
+                }
+                continue;
+            }
+
+            case TOKENIZER_WORD: {
+                if (is(':')) {
+                    state = TOKENIZER_START;
+                    self->index += 1;
+                    token.tag = TOKEN_LABEL;
+                    goto tokenizer_finish;
+                } else if (range('A', 'Z') || range('a', 'z')) {
+                    // eat
+                } else {
+                    token.tag = TOKEN_WORD;
+                    goto tokenizer_finish;
+                }
+                continue;
+            }
+
+            case TOKENIZER_DECIMAL: {
+                if (range('0', '9')) {
+                    // eat
+                } else {
+                    goto tokenizer_finish;
+                }
+                continue;
+            }
+
+            case TOKENIZER_COMMENT: {
+                if (is('\n')) {
+                    goto tokenizer_finish;
+                }
+                continue;
+            }
+
+            case TOKENIZER_TRIVIAL: {
+                if (trivial != c) {
+                    goto tokenizer_finish;
+                } else {
+                    continue;
+                }
+            }
+
+            default:
+                panic("invalid tokenizer state!");
+            }
+
+    #undef range
+    #undef is
+        }
+
+    tokenizer_finish:
+
+        token.end = self->index;
+        DBG("tokenizr", "returning token %s len %ld", token_tag_t_name[token.tag], token.end - token.start);
+        return token;
+    }
+
+<!-- -->
+
+    lang: c esc: [[]] tag: #doctest parser
+    --------------------------------------
+
+    [[project imports]]
+
+    [[data structure library]]
+
+    slice_impl_t(uint8_t);
+
+    [[tokenizer]]
 
     int main(void)
     {
+        {
+            tokenizer_t it = { .text = slice_make_const(uint8_t, "label:") };
+            assert(tokenizer_next(&it).tag == TOKEN_LABEL);
+            assert(tokenizer_next(&it).tag == TOKEN_EOF);
+        }
+        {
+            tokenizer_t it = { .text = slice_make_const(uint8_t, "0x552a") };
+            assert(tokenizer_next(&it).tag == TOKEN_HEX_LITERAL);
+            assert(tokenizer_next(&it).tag == TOKEN_EOF);
+        }
+        {
+            tokenizer_t it = { .text = slice_make_const(uint8_t, "552") };
+            assert(tokenizer_next(&it).tag == TOKEN_DECIMAL_LITERAL);
+            assert(tokenizer_next(&it).tag == TOKEN_EOF);
+        }
+        {
+            tokenizer_t it = { .text = slice_make_const(uint8_t, "[eax]") };
+            assert(tokenizer_next(&it).tag == TOKEN_L_BRACKET);
+            assert(tokenizer_next(&it).tag == TOKEN_WORD);
+            assert(tokenizer_next(&it).tag == TOKEN_R_BRACKET);
+            assert(tokenizer_next(&it).tag == TOKEN_EOF);
+        }
+        {
+            tokenizer_t it = { .text = slice_make_const(uint8_t, "mov ebx, eax") };
+            assert(tokenizer_next(&it).tag == TOKEN_WORD);
+            assert(tokenizer_next(&it).tag == TOKEN_SPACE);
+            assert(tokenizer_next(&it).tag == TOKEN_WORD);
+            assert(tokenizer_next(&it).tag == TOKEN_COMMA);
+            assert(tokenizer_next(&it).tag == TOKEN_SPACE);
+            assert(tokenizer_next(&it).tag == TOKEN_WORD);
+            assert(tokenizer_next(&it).tag == TOKEN_EOF);
+        }
+        {
+            tokenizer_t it = { .text = slice_make_const(uint8_t, "eax;foo\neax") };
+            assert(tokenizer_next(&it).tag == TOKEN_WORD);
+            assert(tokenizer_next(&it).tag == TOKEN_COMMENT);
+            assert(tokenizer_next(&it).tag == TOKEN_NL);
+            assert(tokenizer_next(&it).tag == TOKEN_WORD);
+            assert(tokenizer_next(&it).tag == TOKEN_EOF);
+        }
         return 0;
     }
 
