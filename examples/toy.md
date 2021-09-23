@@ -1081,16 +1081,16 @@
             DBG("hashmap", "i1          %x", i1);                                            \
             DBG("hashmap", "i2          %x", i2);                                            \
                                                                                              \
-            if (self->slot[i1] == 0) {                                                       \
+            if (self->slot[i1].ptr == NULL) {                                                \
                 DBG("hashmap", "slot 1 free %x", i1);                                        \
-                self->slot[i1] = f;                                                          \
+                self->slot[i1] = key;                                                        \
                 self->bucket[i1] = value;                                                    \
                 return 0;                                                                    \
             }                                                                                \
                                                                                              \
-            if (self->slot[i2] == 0) {                                                       \
+            if (self->slot[i2].ptr == NULL) {                                                \
                 DBG("hashmap", "slot 2 free %x", i2);                                        \
-                self->slot[i2] = f;                                                          \
+                self->slot[i2] = key;                                                        \
                 self->bucket[i2] = value;                                                    \
                 return 0;                                                                    \
             }                                                                                \
@@ -1100,13 +1100,11 @@
             DBG("hashmap", "no free slot selecting %x", i);                                  \
                                                                                              \
             V v_current = value;                                                             \
-            uint32_t f_current;                                                              \
+            K f_current = key;                                                               \
                                                                                              \
             for (size_t relo = 0; relo < MAX_CUCKOO_RELOCATIONS; relo++) {                   \
                 V v_tmp = self->bucket[i];                                                   \
-                uint32_t f_tmp = self->slot[i];                                              \
-                                                                                             \
-                DBG("hashmap", "kicking out %x and inserting %x", f_tmp, f_current);         \
+                K f_tmp = self->slot[i];                                                     \
                                                                                              \
                 self->bucket[i] = v_current;                                                 \
                 self->slot[i] = f_current;                                                   \
@@ -1116,15 +1114,15 @@
                                                                                              \
                 i ^= hash(uint8_t, slice_as_bytes(uint32_t, tmp), self->capacity);           \
                                                                                              \
-                if (self->slot[i] == 0) {                                                    \
-                    DBG("hashmap", "empty slot %x found, inserting %x", i, f_current);       \
+                if (self->slot[i].ptr == NULL) {                                             \
+                    DBG("hashmap", "empty slot %x found, inserting", i);                     \
                     self->slot[i] = f_current;                                               \
                     self->bucket[i] = v_current;                                             \
                     return 0;                                                                \
                 }                                                                            \
             }                                                                                \
                                                                                              \
-            ERR("hashmap", "no free slots found, failed inserting %x", f_current);           \
+            ERR("hashmap", "no free slots found, failed inserting %x", 0);                   \
             return -1;                                                                       \
         }
 
@@ -1142,12 +1140,12 @@
             DBG("hashmap", "i1          %x", i1);                                                                \
             DBG("hashmap", "i2          %x", i2);                                                                \
                                                                                                                  \
-            if (self->slot[i1] == f) {                                                                           \
+            if (slice_eql(uint8_t, self->slot[i1], key)) {                                                       \
                 DBG("hashmap", "found in slot 1 (%x)", i1);                                                      \
                 return optional_some(CONCAT4(hashmap_, K, V, _p), &self->bucket[i1]);                            \
             }                                                                                                    \
                                                                                                                  \
-            if (self->slot[i2] == f) {                                                                           \
+            if (slice_eql(uint8_t, self->slot[i2], key)) {                                                       \
                 DBG("hashmap", "found in slot 2 (%x)", i2);                                                      \
                 return optional_some(CONCAT4(hashmap_, K, V, _p), &self->bucket[i2]);                            \
             }                                                                                                    \
@@ -1168,12 +1166,12 @@
             DBG("hashmap", "i1          %x", i1);                                            \
             DBG("hashmap", "i2          %x", i2);                                            \
                                                                                              \
-            if (self->slot[i1] == f) {                                                       \
+            if (slice_eql(uint8_t, self->slot[i1], key)) {                                   \
                 DBG("hashmap", "found in slot 1 (%x)", i1);                                  \
                 return 1;                                                                    \
             }                                                                                \
                                                                                              \
-            if (self->slot[i2] == f) {                                                       \
+            if (slice_eql(uint8_t, self->slot[i2], key)) {                                   \
                 DBG("hashmap", "found in slot 2 (%x)", i2);                                  \
                 return 1;                                                                    \
             }                                                                                \
@@ -1194,12 +1192,12 @@
             DBG("hashmap", "i1          %x", i1);                                            \
             DBG("hashmap", "i2          %x", i2);                                            \
                                                                                              \
-            if (self->slot[i1] == f) {                                                       \
+            if (slice_eql(uint8_t, self->slot[i1], key)) {                                   \
                 DBG("hashmap", "found in slot 1 (%x)", i1);                                  \
                 return optional_some(V, self->bucket[i1]);                                   \
             }                                                                                \
                                                                                              \
-            if (self->slot[i2] == f) {                                                       \
+            if (slice_eql(uint8_t, self->slot[i2], key)) {                                   \
                 DBG("hashmap", "found in slot 2 (%x)", i2);                                  \
                 return optional_some(V, self->bucket[i2]);                                   \
             }                                                                                \
@@ -1220,14 +1218,16 @@
             DBG("hashmap", "i1          %x", i1);                                            \
             DBG("hashmap", "i2          %x", i2);                                            \
                                                                                              \
-            if (self->slot[i1] == f) {                                                       \
+            if (slice_eql(uint8_t, self->slot[i1], key)) {                                   \
                 DBG("hashmap", "found in slot 1 (%x), removing %x", i1, f);                  \
-                self->slot[i1] = 0;                                                          \
+                self->slot[i1].ptr = NULL;                                                   \
+                self->slot[i1].len = 0;                                                      \
             }                                                                                \
                                                                                              \
-            if (self->slot[i2] == f) {                                                       \
+            if (slice_eql(uint8_t, self->slot[i2], key)) {                                   \
                 DBG("hashmap", "found in slot 2 (%x), removing %x", i2, f);                  \
-                self->slot[i2] = 0;                                                          \
+                self->slot[i2].ptr = NULL;                                                   \
+                self->slot[i2].len = 0;                                                      \
             }                                                                                \
                                                                                              \
             DBG("hashmap", "key %x not found", f);                                           \
@@ -1235,7 +1235,7 @@
 
     #define hashmap_impl_t(K, V)                  \
         typedef struct {                          \
-            uint32_t* slot;                       \
+            slice_t(uint8_t) * slot;              \
             V* bucket;                            \
             size_t capacity;                      \
         } CONCAT3(hashmap_, K, V);                \
@@ -1279,11 +1279,29 @@
         assert(missing.none == 1);
 
         assert(hashmap_put(&map.some, string_t, uint8_t, slice_make_const(uint8_t, "hello"), 9) == 0);
-
-        optional_t(uint8_t) result = hashmap_get(&map.some, string_t, uint8_t, slice_make_const(uint8_t, "hello"));
-        assert(result.none == 0);
-        assert(result.some == 9);
-
+        assert(hashmap_put(&map.some, string_t, uint8_t, slice_make_const(uint8_t, "bye"), 8) == 0);
+        assert(hashmap_put(&map.some, string_t, uint8_t, slice_make_const(uint8_t, "hi"), 7) == 0);
+        assert(hashmap_put(&map.some, string_t, uint8_t, slice_make_const(uint8_t, "welp"), 6) == 0);
+        {
+            optional_t(uint8_t) result = hashmap_get(&map.some, string_t, uint8_t, slice_make_const(uint8_t, "hello"));
+            assert(result.none == 0);
+            assert(result.some == 9);
+        }
+        {
+            optional_t(uint8_t) result = hashmap_get(&map.some, string_t, uint8_t, slice_make_const(uint8_t, "bye"));
+            assert(result.none == 0);
+            assert(result.some == 8);
+        }
+        {
+            optional_t(uint8_t) result = hashmap_get(&map.some, string_t, uint8_t, slice_make_const(uint8_t, "hi"));
+            assert(result.none == 0);
+            assert(result.some == 7);
+        }
+        {
+            optional_t(uint8_t) result = hashmap_get(&map.some, string_t, uint8_t, slice_make_const(uint8_t, "welp"));
+            assert(result.none == 0);
+            assert(result.some == 6);
+        }
         hashmap_deinit(&map.some, string_t, uint8_t);
         assert(map.some.capacity == 0);
         assert(map.some.slot == NULL);
