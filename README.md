@@ -66,6 +66,15 @@ $ zangle call README.md --tag=linker --file=lib/lib.zig
         list_files: bool = false,
         list_tags: bool = false,
         calls: []const FileOrTag = &.{},
+        graphviz_border: u24 = 0x92abc9,
+        graphviz_colours: []const u24 = &.{
+            0xdf4d77,
+            0x2288ed,
+            0x94bd76,
+            0xc678dd,
+            0x61aeee,
+            0xe3bd79,
+        },
         command: Command,
 
         pub const FileOrTag = union(enum) {
@@ -143,8 +152,11 @@ $ zangle call README.md --tag=linker --file=lib/lib.zig
 
             .graphviz => {
                 var context = GraphvizContext.init(gpa, stdout);
+                context.colours = options.graphviz_colours;
 
-                try context.begin();
+                try context.begin(.{
+                    .colour = options.graphviz_border,
+                });
 
                 for (vm.linker.files.keys()) |path| {
                     try vm.callFile(gpa, path, *GraphvizContext, &context);
@@ -192,6 +204,7 @@ TODO: js example using zangle
     const testing = std.testing;
     const meta = std.meta;
     const fs = std.fs;
+    const fmt = std.fmt;
     const io = std.io;
     const os = std.os;
     const stdout = io.getStdOut().writer();
@@ -234,6 +247,8 @@ TODO: js example using zangle
         tag,
         list_tags,
         list_files,
+        graphviz_border,
+        graphviz_colours,
         @"--",
 
         pub const map = std.ComptimeStringMap(Flag, .{
@@ -243,6 +258,8 @@ TODO: js example using zangle
             .{ "--tag=", .tag },
             .{ "--list-tags", .list_tags },
             .{ "--list-files", .list_files },
+            .{ "--graphviz-border=", .graphviz_border },
+            .{ "--graphviz-colours=", .graphviz_colours },
             .{ "--", .@"--" },
         });
     };
@@ -270,6 +287,9 @@ TODO: js example using zangle
 
     const graphviz_help =
         \\Usage: zangle graphviz [files]
+        \\
+        \\  --graphviz-border=[#rrggbb]       Select item border colour
+        \\  --graphviz-colours=[#rrggbb,...]  Select spline colours
     ;
 
     const log = std.log;
@@ -323,6 +343,8 @@ TODO: js example using zangle
 
         var interpret_flags_as_files: bool = false;
         var calls = std.ArrayList(Options.FileOrTag).init(gpa);
+        var graphviz_colours = std.ArrayList(u24).init(gpa);
+        var graphviz_colours_set = false;
 
         options.command = command.?;
 
@@ -355,7 +377,20 @@ TODO: js example using zangle
                         else => return error.@"Unknown command-line flag",
                     },
 
-                    .graphviz => return error.@"Unknown command-line flag",
+                    .graphviz => switch (flag) {
+                        .graphviz_border => options.graphviz_border = try parseColour(arg[split..]),
+
+                        .graphviz_colours => {
+                            var it = mem.tokenize(u8, arg[split..], ",");
+
+                            while (it.next()) |item| {
+                                try graphviz_colours.append(try parseColour(item));
+                            }
+
+                            graphviz_colours_set = true;
+                        },
+                        else => return error.@"Unknown command-line flag",
+                    },
 
                     .tangle => switch (flag) {
                         .allow_absolute_paths => options.allow_absolute_paths = true,
@@ -374,7 +409,19 @@ TODO: js example using zangle
         }
 
         options.calls = calls.toOwnedSlice();
+        if (graphviz_colours_set) {
+            options.graphviz_colours = graphviz_colours.toOwnedSlice();
+        }
         return options;
+    }
+
+    fn parseColour(text: []const u8) !u24 {
+        if (text.len == 7) {
+            if (text[0] != '#') return error.@"Invalid colour spexification, expected '#'";
+            return fmt.parseInt(u24, text[1..], 16) catch error.@"Colour specification is not a valid 24-bit hex number";
+        } else {
+            return error.@"Invalid hex colour specification length; expecting a 6 hex digit colour prefixed with a '#'";
+        }
     }
 
 ## Loading files
@@ -438,6 +485,7 @@ TODO: js example using zangle
         gpa: *Allocator,
         colour: u8 = 0,
         target: Target = .{},
+        colours: []const u24 = &.{},
 
         pub const Stack = ArrayList(Layer);
         pub const Layer = struct {
@@ -461,15 +509,19 @@ TODO: js example using zangle
             };
         }
 
-        pub fn begin(self: *GraphvizContext) !void {
-            try self.stream.writer().writeAll(
-                \\graph G {
+        pub const GraphvizOptions = struct {
+            colour: u24 = 0,
+        };
+
+        pub fn begin(self: *GraphvizContext, options: GraphvizOptions) !void {
+            try self.stream.writer().print(
+                \\graph G {{
                 \\    overlap = false;
                 \\    rankdir = LR;
                 \\    concentrate = true;
-                \\    node[shape = rectangle, color = "#92abc9"];
+                \\    node[shape = rectangle, color = "#{[colour]x:0>6}"];
                 \\
-            );
+            , options);
             try self.stack.append(self.gpa, .{});
         }
 
@@ -505,15 +557,6 @@ TODO: js example using zangle
             assert(self.stack.items.len == 1);
         }
 
-        const colours: []const u24 = &.{
-            0xdf4d77,
-            0x2288ed,
-            0x94bd76,
-            0xc678dd,
-            0x61aeee,
-            0xe3bd79,
-        };
-
         fn render(self: *GraphvizContext, name: []const u8) !void {
             const writer = self.stream.writer();
             const sub_nodes = self.stack.items[self.stack.items.len - 1].list.items;
@@ -526,7 +569,7 @@ TODO: js example using zangle
             }
 
             if (valid == 0) {
-                try writer.print("    \"{s}\";", .{name});
+                try writer.print("    \"{s}\";\n", .{name});
             } else {
                 for (sub_nodes) |sub| {
                     const entry = try self.omit.getOrPut(self.gpa, .{
@@ -541,12 +584,16 @@ TODO: js example using zangle
                             self.colour +%= 1;
                         }
 
+                        const selected = if (self.colours.len == 0)
+                            0
+                        else
+                            self.colours[colour.value_ptr.* % self.colours.len];
+
                         try writer.print("    \"{s}\" -- ", .{name});
-                        try writer.print("\"{s}\"[color = \"#{x:0>6}\"]", .{
+                        try writer.print("\"{s}\"[color = \"#{x:0>6}\"];\n", .{
                             sub,
-                            colours[colour.value_ptr.* % colours.len],
+                            selected,
                         });
-                        try writer.writeAll(";\n");
                     }
                 }
             }
