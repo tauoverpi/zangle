@@ -66,8 +66,8 @@ $ zangle call README.md --tag=linker --file=lib/lib.zig
         list_files: bool = false,
         list_tags: bool = false,
         calls: []const FileOrTag = &.{},
-        graphviz_border: u24 = 0x92abc9,
-        graphviz_colours: []const u24 = &.{
+        graph_border: u24 = 0x92abc9,
+        graph_colours: []const u24 = &.{
             0xdf4d77,
             0x2288ed,
             0x94bd76,
@@ -150,21 +150,21 @@ $ zangle call README.md --tag=linker --file=lib/lib.zig
                 try context.stream.flush();
             },
 
-            .graphviz => {
-                var context = GraphvizContext.init(gpa, stdout);
-                context.colours = options.graphviz_colours;
+            .graph => {
+                var context = GraphContext.init(gpa, stdout);
+                context.colours = options.graph_colours;
 
                 try context.begin(.{
-                    .colour = options.graphviz_border,
+                    .colour = options.graph_border,
                 });
 
                 for (vm.linker.files.keys()) |path| {
-                    try vm.callFile(gpa, path, *GraphvizContext, &context);
+                    try vm.callFile(gpa, path, *GraphContext, &context);
                 }
 
                 for (vm.linker.procedures.keys()) |proc| {
                     if (!context.target.contains(proc.ptr)) {
-                        try vm.call(gpa, proc, *GraphvizContext, &context);
+                        try vm.call(gpa, proc, *GraphContext, &context);
                     }
                 }
 
@@ -229,14 +229,14 @@ TODO: js example using zangle
         tangle,
         ls,
         call,
-        graphviz,
+        graph,
 
         pub const map = std.ComptimeStringMap(Command, .{
             .{ "help", .help },
             .{ "tangle", .tangle },
             .{ "ls", .ls },
             .{ "call", .call },
-            .{ "graphviz", .graphviz },
+            .{ "graph", .graph },
         });
     };
 
@@ -247,8 +247,8 @@ TODO: js example using zangle
         tag,
         list_tags,
         list_files,
-        graphviz_border,
-        graphviz_colours,
+        graph_border,
+        graph_colours,
         @"--",
 
         pub const map = std.ComptimeStringMap(Flag, .{
@@ -258,8 +258,8 @@ TODO: js example using zangle
             .{ "--tag=", .tag },
             .{ "--list-tags", .list_tags },
             .{ "--list-files", .list_files },
-            .{ "--graphviz-border=", .graphviz_border },
-            .{ "--graphviz-colours=", .graphviz_colours },
+            .{ "--graph-border=", .graph_border },
+            .{ "--graph-colours=", .graph_colours },
             .{ "--", .@"--" },
         });
     };
@@ -285,11 +285,11 @@ TODO: js example using zangle
         \\  --tag=[tagname]    Render tag block to stdout
     ;
 
-    const graphviz_help =
-        \\Usage: zangle graphviz [files]
+    const graph_help =
+        \\Usage: zangle graph [files]
         \\
-        \\  --graphviz-border=[#rrggbb]       Select item border colour
-        \\  --graphviz-colours=[#rrggbb,...]  Select spline colours
+        \\  --graph-border=[#rrggbb]       Select item border colour
+        \\  --graph-colours=[#rrggbb,...]  Select spline colours
     ;
 
     const log = std.log;
@@ -298,7 +298,7 @@ TODO: js example using zangle
         log.info(tangle_help, .{});
         log.info(ls_help, .{});
         log.info(call_help, .{});
-        log.info(graphviz_help, .{});
+        log.info(graph_help, .{});
     }
 
     fn help(com: ?Command, name: ?[]const u8) void {
@@ -313,7 +313,7 @@ TODO: js example using zangle
             .tangle => log.info(tangle_help, .{}),
             .ls => log.info(ls_help, .{}),
             .call => log.info(call_help, .{}),
-            .graphviz => log.info(graphviz_help, .{}),
+            .graph => log.info(graph_help, .{}),
         }
     }
 
@@ -343,8 +343,8 @@ TODO: js example using zangle
 
         var interpret_flags_as_files: bool = false;
         var calls = std.ArrayList(Options.FileOrTag).init(gpa);
-        var graphviz_colours = std.ArrayList(u24).init(gpa);
-        var graphviz_colours_set = false;
+        var graph_colours = std.ArrayList(u24).init(gpa);
+        var graph_colours_set = false;
 
         options.command = command.?;
 
@@ -377,17 +377,17 @@ TODO: js example using zangle
                         else => return error.@"Unknown command-line flag",
                     },
 
-                    .graphviz => switch (flag) {
-                        .graphviz_border => options.graphviz_border = try parseColour(arg[split..]),
+                    .graph => switch (flag) {
+                        .graph_border => options.graph_border = try parseColour(arg[split..]),
 
-                        .graphviz_colours => {
+                        .graph_colours => {
                             var it = mem.tokenize(u8, arg[split..], ",");
 
                             while (it.next()) |item| {
-                                try graphviz_colours.append(try parseColour(item));
+                                try graph_colours.append(try parseColour(item));
                             }
 
-                            graphviz_colours_set = true;
+                            graph_colours_set = true;
                         },
                         else => return error.@"Unknown command-line flag",
                     },
@@ -409,8 +409,8 @@ TODO: js example using zangle
         }
 
         options.calls = calls.toOwnedSlice();
-        if (graphviz_colours_set) {
-            options.graphviz_colours = graphviz_colours.toOwnedSlice();
+        if (graph_colours_set) {
+            options.graph_colours = graph_colours.toOwnedSlice();
         }
         return options;
     }
@@ -478,7 +478,7 @@ TODO: js example using zangle
         }
     };
 
-    const GraphvizContext = struct {
+    const GraphContext = struct {
         stream: Stream,
         stack: Stack = .{},
         omit: Omit = .{},
@@ -502,18 +502,18 @@ TODO: js example using zangle
 
         pub const Stream = io.BufferedWriter(1024, std.fs.File.Writer);
 
-        pub fn init(gpa: *Allocator, writer: fs.File.Writer) GraphvizContext {
+        pub fn init(gpa: *Allocator, writer: fs.File.Writer) GraphContext {
             return .{
                 .stream = .{ .unbuffered_writer = writer },
                 .gpa = gpa,
             };
         }
 
-        pub const GraphvizOptions = struct {
+        pub const GraphOptions = struct {
             colour: u24 = 0,
         };
 
-        pub fn begin(self: *GraphvizContext, options: GraphvizOptions) !void {
+        pub fn begin(self: *GraphContext, options: GraphOptions) !void {
             try self.stream.writer().print(
                 \\graph G {{
                 \\    overlap = false;
@@ -525,18 +525,18 @@ TODO: js example using zangle
             try self.stack.append(self.gpa, .{});
         }
 
-        pub fn end(self: *GraphvizContext) !void {
+        pub fn end(self: *GraphContext) !void {
             try self.stream.writer().writeAll("}\n");
         }
 
-        pub fn call(self: *GraphvizContext, ip: u32, module: u16, indent: u16) !void {
+        pub fn call(self: *GraphContext, ip: u32, module: u16, indent: u16) !void {
             _ = ip;
             _ = module;
             _ = indent;
             try self.stack.append(self.gpa, .{});
         }
 
-        pub fn ret(self: *GraphvizContext, ip: u32, module: u16, indent: u16, name: []const u8) !void {
+        pub fn ret(self: *GraphContext, ip: u32, module: u16, indent: u16, name: []const u8) !void {
             _ = ip;
             _ = module;
             _ = indent;
@@ -549,7 +549,7 @@ TODO: js example using zangle
             try self.stack.items[self.stack.items.len - 1].list.append(self.gpa, name);
         }
 
-        pub fn terminate(self: *GraphvizContext, name: []const u8) !void {
+        pub fn terminate(self: *GraphContext, name: []const u8) !void {
             try self.render(name);
 
             self.stack.items[0].list.clearRetainingCapacity();
@@ -557,7 +557,7 @@ TODO: js example using zangle
             assert(self.stack.items.len == 1);
         }
 
-        fn render(self: *GraphvizContext, name: []const u8) !void {
+        fn render(self: *GraphContext, name: []const u8) !void {
             const writer = self.stream.writer();
             const sub_nodes = self.stack.items[self.stack.items.len - 1].list.items;
 
