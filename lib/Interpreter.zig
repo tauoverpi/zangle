@@ -47,6 +47,49 @@ pub fn step(vm: *Interpreter, gpa: *Allocator, comptime T: type, eval: T) !bool 
     return true;
 }
 
+fn execHalt(vm: *Interpreter, comptime T: type, data: Instruction.Data.Halt, eval: T) !void {
+    _ = vm;
+    if (@hasDecl(Child(T), "halt")) try eval.vm(data);
+}
+fn execRet(vm: *Interpreter, comptime T: type, data: Instruction.Data.Ret, eval: T) !bool {
+    const name = vm.linker.objects.items[vm.module - 1]
+        .text[data.start .. data.start + data.len];
+
+    if (vm.stack.popOrNull()) |location| {
+        const mod = vm.module;
+        const ip = vm.ip;
+
+        vm.ip = location.value.ip;
+        vm.module = location.value.module;
+        vm.indent -= location.value.indent;
+
+        if (@hasDecl(Child(T), "ret")) try eval.ret(
+            vm.ip,
+            vm.module,
+            vm.indent,
+            name,
+        );
+        log.debug("[mod {d} ip {x:0>8}] ret(mod {d}, ip {x:0>8}, indent {d}, identifier '{s}')", .{
+            mod,
+            ip,
+            vm.module,
+            vm.ip,
+            vm.indent,
+            name,
+        });
+
+        return true;
+    }
+
+    if (@hasDecl(Child(T), "terminate")) try eval.terminate(name);
+    log.debug("[mod {d} ip {x:0>8}] terminate(identifier '{s}')", .{
+        vm.module,
+        vm.ip,
+        name,
+    });
+
+    return false;
+}
 const Test = struct {
     stream: Stream,
 
@@ -239,45 +282,6 @@ pub fn callFile(vm: *Interpreter, gpa: *Allocator, symbol: []const u8, comptime 
         log.debug("calling {s} address {x:0>8} module {d}", .{ symbol, vm.ip, vm.module });
         while (try vm.step(gpa, T, eval)) {}
     } else return error.@"Unknown procedure";
-}
-fn execRet(vm: *Interpreter, comptime T: type, data: Instruction.Data.Ret, eval: T) !bool {
-    const name = vm.linker.objects.items[vm.module - 1]
-        .text[data.start .. data.start + data.len];
-
-    if (vm.stack.popOrNull()) |location| {
-        const mod = vm.module;
-        const ip = vm.ip;
-
-        vm.ip = location.value.ip;
-        vm.module = location.value.module;
-        vm.indent -= location.value.indent;
-
-        if (@hasDecl(Child(T), "ret")) try eval.ret(
-            vm.ip,
-            vm.module,
-            vm.indent,
-            name,
-        );
-        log.debug("[mod {d} ip {x:0>8}] ret(mod {d}, ip {x:0>8}, indent {d}, identifier '{s}')", .{
-            mod,
-            ip,
-            vm.module,
-            vm.ip,
-            vm.indent,
-            name,
-        });
-
-        return true;
-    }
-
-    if (@hasDecl(Child(T), "terminate")) try eval.terminate(name);
-    log.debug("[mod {d} ip {x:0>8}] terminate(identifier '{s}')", .{
-        vm.module,
-        vm.ip,
-        name,
-    });
-
-    return false;
 }
 fn execJmp(vm: *Interpreter, comptime T: type, data: Instruction.Data.Jmp, eval: T) !void {
     const mod = vm.module;

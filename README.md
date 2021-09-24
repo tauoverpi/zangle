@@ -72,7 +72,9 @@ $ zangle graph README.md | dot -Tpng -o grpah.png
         list_files: bool = false,
         list_tags: bool = false,
         calls: []const FileOrTag = &.{},
-        graph_border: u24 = 0x92abc9,
+        graph_text_colour: u24 = 0x000000,
+        graph_background_colour: u24 = 0xffffff,
+        graph_border_colour: u24 = 0x92abc9,
         graph_colours: []const u24 = &.{
             0xdf4d77,
             0x2288ed,
@@ -158,10 +160,12 @@ $ zangle graph README.md | dot -Tpng -o grpah.png
 
             .graph => {
                 var context = GraphContext.init(gpa, stdout);
-                context.colours = options.graph_colours;
 
                 try context.begin(.{
-                    .colour = options.graph_border,
+                    .border = options.graph_border_colour,
+                    .background = options.graph_background_colour,
+                    .text = options.graph_text_colour,
+                    .colours = options.graph_colours,
                 });
 
                 for (vm.linker.files.keys()) |path| {
@@ -253,8 +257,10 @@ TODO: js example using zangle
         tag,
         list_tags,
         list_files,
-        graph_border,
+        graph_border_colour,
         graph_colours,
+        graph_background_colour,
+        graph_text_colour,
         @"--",
 
         pub const map = std.ComptimeStringMap(Flag, .{
@@ -264,8 +270,10 @@ TODO: js example using zangle
             .{ "--tag=", .tag },
             .{ "--list-tags", .list_tags },
             .{ "--list-files", .list_files },
-            .{ "--graph-border=", .graph_border },
+            .{ "--graph-border-colour=", .graph_border_colour },
             .{ "--graph-colours=", .graph_colours },
+            .{ "--graph-background-colour=", .graph_background_colour },
+            .{ "--graph-text-colour=", .graph_text_colour },
             .{ "--", .@"--" },
         });
     };
@@ -384,7 +392,9 @@ TODO: js example using zangle
                     },
 
                     .graph => switch (flag) {
-                        .graph_border => options.graph_border = try parseColour(arg[split..]),
+                        .graph_border_colour => options.graph_border_colour = try parseColour(arg[split..]),
+                        .graph_background_colour => options.graph_background_colour = try parseColour(arg[split..]),
+                        .graph_text_colour => options.graph_text_colour = try parseColour(arg[split..]),
 
                         .graph_colours => {
                             var it = mem.tokenize(u8, arg[split..], ",");
@@ -395,6 +405,7 @@ TODO: js example using zangle
 
                             graph_colours_set = true;
                         },
+
                         else => return error.@"Unknown command-line flag",
                     },
 
@@ -491,6 +502,7 @@ TODO: js example using zangle
         gpa: *Allocator,
         colour: u8 = 0,
         target: Target = .{},
+        text_colour: u24 = 0,
         colours: []const u24 = &.{},
 
         pub const Stack = ArrayList(Layer);
@@ -516,19 +528,30 @@ TODO: js example using zangle
         }
 
         pub const GraphOptions = struct {
-            colour: u24 = 0,
+            border: u24 = 0,
+            background: u24 = 0,
+            text: u24 = 0,
+            colours: []const u24 = &.{},
         };
 
         pub fn begin(self: *GraphContext, options: GraphOptions) !void {
             try self.stream.writer().print(
                 \\graph G {{
+                \\    bgcolor = "#{[background]x:0>6}";
                 \\    overlap = false;
                 \\    rankdir = LR;
                 \\    concentrate = true;
-                \\    node[shape = rectangle, color = "#{[colour]x:0>6}"];
+                \\    node[shape = rectangle, color = "#{[border]x:0>6}"];
                 \\
-            , options);
+            , .{
+                .background = options.background,
+                .border = options.border,
+            });
+
             try self.stack.append(self.gpa, .{});
+
+            self.colours = options.colours;
+            self.text_colour = options.text;
         }
 
         pub fn end(self: *GraphContext) !void {
@@ -574,33 +597,38 @@ TODO: js example using zangle
                 }
             }
 
-            if (valid == 0) {
-                try writer.print("    \"{s}\";\n", .{name});
-            } else {
-                for (sub_nodes) |sub| {
-                    const entry = try self.omit.getOrPut(self.gpa, .{
-                        .from = name.ptr,
-                        .to = sub.ptr,
+            const theme = try self.target.getOrPut(self.gpa, name.ptr);
+            if (!theme.found_existing) {
+                theme.value_ptr.* = self.colour;
+                self.colour +%= 1;
+
+                try writer.print(
+                    \\    "{[name]s}"[fontcolor = "#{[colour]x:0>6}"];
+                    \\
+                , .{
+                    .name = name,
+                    .colour = self.text_colour,
+                });
+            }
+
+            for (sub_nodes) |sub| {
+                const entry = try self.omit.getOrPut(self.gpa, .{
+                    .from = name.ptr,
+                    .to = sub.ptr,
+                });
+
+                if (!entry.found_existing) {
+                    const colour = self.target.get(sub.ptr).?;
+                    const selected = if (self.colours.len == 0)
+                        0
+                    else
+                        self.colours[colour % self.colours.len];
+
+                    try writer.print("    \"{s}\" -- ", .{name});
+                    try writer.print("\"{s}\"[color = \"#{x:0>6}\"];\n", .{
+                        sub,
+                        selected,
                     });
-
-                    if (!entry.found_existing) {
-                        const colour = try self.target.getOrPut(self.gpa, sub.ptr);
-                        if (!colour.found_existing) {
-                            colour.value_ptr.* = self.colour;
-                            self.colour +%= 1;
-                        }
-
-                        const selected = if (self.colours.len == 0)
-                            0
-                        else
-                            self.colours[colour.value_ptr.* % self.colours.len];
-
-                        try writer.print("    \"{s}\" -- ", .{name});
-                        try writer.print("\"{s}\"[color = \"#{x:0>6}\"];\n", .{
-                            sub,
-                            selected,
-                        });
-                    }
                 }
             }
         }
@@ -694,14 +722,13 @@ blocks (by tag name) together into one.
 
 ## Instructions
 
-Each instruction consists of an 8-bit opcode along with a 64-bit data argument.
-
 ### Ret
 
 Pops the location and module in which the matching `call` instruction
 originated from. If any filters have been registered in the calling context
 then this instruction marks the end of the context and executes the action
-bound.
+bound. The payload includes the index and length of the current procedure
+name which is provided as a parameter to rendering contexts.
 
     lang: zig esc: none tag: #instruction list
     ------------------------------------------
@@ -728,6 +755,57 @@ bound.
             .opcode = .ret,
             .data = .{ .ret = params },
         });
+    }
+
+Execution of the `ret` instruction.
+
+`ret` will invoke the `ret` method of the render context upon returning from
+a normal procedure and `terminate` upon reaching the end of the program. Of
+the parameters, `module` is that of the caller and `ip` points to the next
+instruction to be run which a rendering context can use to calculate the
+entry-point of the procedure.
+
+    lang: zig esc: none tag: #interpreter step
+    ------------------------------------------
+
+    fn execRet(vm: *Interpreter, comptime T: type, data: Instruction.Data.Ret, eval: T) !bool {
+        const name = vm.linker.objects.items[vm.module - 1]
+            .text[data.start .. data.start + data.len];
+
+        if (vm.stack.popOrNull()) |location| {
+            const mod = vm.module;
+            const ip = vm.ip;
+
+            vm.ip = location.value.ip;
+            vm.module = location.value.module;
+            vm.indent -= location.value.indent;
+
+            if (@hasDecl(Child(T), "ret")) try eval.ret(
+                vm.ip,
+                vm.module,
+                vm.indent,
+                name,
+            );
+            log.debug("[mod {d} ip {x:0>8}] ret(mod {d}, ip {x:0>8}, indent {d}, identifier '{s}')", .{
+                mod,
+                ip,
+                vm.module,
+                vm.ip,
+                vm.indent,
+                name,
+            });
+
+            return true;
+        }
+
+        if (@hasDecl(Child(T), "terminate")) try eval.terminate(name);
+        log.debug("[mod {d} ip {x:0>8}] terminate(identifier '{s}')", .{
+            vm.module,
+            vm.ip,
+            name,
+        });
+
+        return false;
     }
 
 ### Jmp
@@ -1185,48 +1263,6 @@ Rendering is handled by passing interpreters
 
 <!-- -->
 
-    lang: zig esc: none tag: #interpreter step
-    ------------------------------------------
-
-    fn execRet(vm: *Interpreter, comptime T: type, data: Instruction.Data.Ret, eval: T) !bool {
-        const name = vm.linker.objects.items[vm.module - 1]
-            .text[data.start .. data.start + data.len];
-
-        if (vm.stack.popOrNull()) |location| {
-            const mod = vm.module;
-            const ip = vm.ip;
-
-            vm.ip = location.value.ip;
-            vm.module = location.value.module;
-            vm.indent -= location.value.indent;
-
-            if (@hasDecl(Child(T), "ret")) try eval.ret(
-                vm.ip,
-                vm.module,
-                vm.indent,
-                name,
-            );
-            log.debug("[mod {d} ip {x:0>8}] ret(mod {d}, ip {x:0>8}, indent {d}, identifier '{s}')", .{
-                mod,
-                ip,
-                vm.module,
-                vm.ip,
-                vm.indent,
-                name,
-            });
-
-            return true;
-        }
-
-        if (@hasDecl(Child(T), "terminate")) try eval.terminate(name);
-        log.debug("[mod {d} ip {x:0>8}] terminate(identifier '{s}')", .{
-            vm.module,
-            vm.ip,
-            name,
-        });
-
-        return false;
-    }
 
 <!-- -->
 

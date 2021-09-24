@@ -29,7 +29,9 @@ const Options = struct {
     list_files: bool = false,
     list_tags: bool = false,
     calls: []const FileOrTag = &.{},
-    graph_border: u24 = 0x92abc9,
+    graph_text_colour: u24 = 0x000000,
+    graph_background_colour: u24 = 0xffffff,
+    graph_border_colour: u24 = 0x92abc9,
     graph_colours: []const u24 = &.{
         0xdf4d77,
         0x2288ed,
@@ -69,8 +71,10 @@ const Flag = enum {
     tag,
     list_tags,
     list_files,
-    graph_border,
+    graph_border_colour,
     graph_colours,
+    graph_background_colour,
+    graph_text_colour,
     @"--",
 
     pub const map = std.ComptimeStringMap(Flag, .{
@@ -80,8 +84,10 @@ const Flag = enum {
         .{ "--tag=", .tag },
         .{ "--list-tags", .list_tags },
         .{ "--list-files", .list_files },
-        .{ "--graph-border=", .graph_border },
+        .{ "--graph-border-colour=", .graph_border_colour },
         .{ "--graph-colours=", .graph_colours },
+        .{ "--graph-background-colour=", .graph_background_colour },
+        .{ "--graph-text-colour=", .graph_text_colour },
         .{ "--", .@"--" },
     });
 };
@@ -200,7 +206,9 @@ fn parseCli(gpa: *Allocator, objects: *Linker.Object.List) !?Options {
                 },
 
                 .graph => switch (flag) {
-                    .graph_border => options.graph_border = try parseColour(arg[split..]),
+                    .graph_border_colour => options.graph_border_colour = try parseColour(arg[split..]),
+                    .graph_background_colour => options.graph_background_colour = try parseColour(arg[split..]),
+                    .graph_text_colour => options.graph_text_colour = try parseColour(arg[split..]),
 
                     .graph_colours => {
                         var it = mem.tokenize(u8, arg[split..], ",");
@@ -211,6 +219,7 @@ fn parseCli(gpa: *Allocator, objects: *Linker.Object.List) !?Options {
 
                         graph_colours_set = true;
                     },
+
                     else => return error.@"Unknown command-line flag",
                 },
 
@@ -275,6 +284,7 @@ const GraphContext = struct {
     gpa: *Allocator,
     colour: u8 = 0,
     target: Target = .{},
+    text_colour: u24 = 0,
     colours: []const u24 = &.{},
 
     pub const Stack = ArrayList(Layer);
@@ -300,19 +310,30 @@ const GraphContext = struct {
     }
 
     pub const GraphOptions = struct {
-        colour: u24 = 0,
+        border: u24 = 0,
+        background: u24 = 0,
+        text: u24 = 0,
+        colours: []const u24 = &.{},
     };
 
     pub fn begin(self: *GraphContext, options: GraphOptions) !void {
         try self.stream.writer().print(
             \\graph G {{
+            \\    bgcolor = "#{[background]x:0>6}";
             \\    overlap = false;
             \\    rankdir = LR;
             \\    concentrate = true;
-            \\    node[shape = rectangle, color = "#{[colour]x:0>6}"];
+            \\    node[shape = rectangle, color = "#{[border]x:0>6}"];
             \\
-        , options);
+        , .{
+            .background = options.background,
+            .border = options.border,
+        });
+
         try self.stack.append(self.gpa, .{});
+
+        self.colours = options.colours;
+        self.text_colour = options.text;
     }
 
     pub fn end(self: *GraphContext) !void {
@@ -358,33 +379,38 @@ const GraphContext = struct {
             }
         }
 
-        if (valid == 0) {
-            try writer.print("    \"{s}\";\n", .{name});
-        } else {
-            for (sub_nodes) |sub| {
-                const entry = try self.omit.getOrPut(self.gpa, .{
-                    .from = name.ptr,
-                    .to = sub.ptr,
+        const theme = try self.target.getOrPut(self.gpa, name.ptr);
+        if (!theme.found_existing) {
+            theme.value_ptr.* = self.colour;
+            self.colour +%= 1;
+
+            try writer.print(
+                \\    "{[name]s}"[fontcolor = "#{[colour]x:0>6}"];
+                \\
+            , .{
+                .name = name,
+                .colour = self.text_colour,
+            });
+        }
+
+        for (sub_nodes) |sub| {
+            const entry = try self.omit.getOrPut(self.gpa, .{
+                .from = name.ptr,
+                .to = sub.ptr,
+            });
+
+            if (!entry.found_existing) {
+                const colour = self.target.get(sub.ptr).?;
+                const selected = if (self.colours.len == 0)
+                    0
+                else
+                    self.colours[colour % self.colours.len];
+
+                try writer.print("    \"{s}\" -- ", .{name});
+                try writer.print("\"{s}\"[color = \"#{x:0>6}\"];\n", .{
+                    sub,
+                    selected,
                 });
-
-                if (!entry.found_existing) {
-                    const colour = try self.target.getOrPut(self.gpa, sub.ptr);
-                    if (!colour.found_existing) {
-                        colour.value_ptr.* = self.colour;
-                        self.colour +%= 1;
-                    }
-
-                    const selected = if (self.colours.len == 0)
-                        0
-                    else
-                        self.colours[colour.value_ptr.* % self.colours.len];
-
-                    try writer.print("    \"{s}\" -- ", .{name});
-                    try writer.print("\"{s}\"[color = \"#{x:0>6}\"];\n", .{
-                        sub,
-                        selected,
-                    });
-                }
             }
         }
     }
@@ -455,10 +481,12 @@ pub fn run() !void {
 
         .graph => {
             var context = GraphContext.init(gpa, stdout);
-            context.colours = options.graph_colours;
 
             try context.begin(.{
-                .colour = options.graph_border,
+                .border = options.graph_border_colour,
+                .background = options.graph_background_colour,
+                .text = options.graph_text_colour,
+                .colours = options.graph_colours,
             });
 
             for (vm.linker.files.keys()) |path| {

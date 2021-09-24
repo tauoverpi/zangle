@@ -16,6 +16,17 @@ obj: Linker.Object,
 const Token = Tokenizer.Token;
 const log = std.log.scoped(.parser);
 
+fn emitHalt(
+    p: *Parser,
+    gpa: *Allocator,
+    params: Instruction.Data.Halt,
+) !void {
+    log.debug("emitting halt", .{});
+    try p.obj.program.append(gpa, .{
+        .opcode = .halt,
+        .data = .{ .halt = params },
+    });
+}
 fn emitRet(
     p: *Parser,
     gpa: *Allocator,
