@@ -145,9 +145,17 @@ $ zangle call README.md --tag=linker --file=lib/lib.zig
                 var context = GraphvizContext.init(gpa, stdout);
 
                 try context.begin();
+
                 for (vm.linker.files.keys()) |path| {
                     try vm.callFile(gpa, path, *GraphvizContext, &context);
                 }
+
+                for (vm.linker.procedures.keys()) |proc| {
+                    if (!context.target.contains(proc.ptr)) {
+                        try vm.call(gpa, proc, *GraphvizContext, &context);
+                    }
+                }
+
                 try context.end();
 
                 try context.stream.flush();
