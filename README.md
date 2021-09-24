@@ -29,6 +29,12 @@ Render the content of a tag and file to stdout.
 $ zangle call README.md --tag=linker --file=lib/lib.zig
 ```
 
+Render a graph representing document structure.
+
+```
+$ zangle graph README.md | dot -Tpng -o grpah.png
+```
+
 ## As a library
 
     lang: zig esc: none file: lib/lib.zig
