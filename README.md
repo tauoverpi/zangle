@@ -11,17 +11,23 @@ indented code blocks.
 
 Tangle all files within a document.
 
-    $ rm -rf src lib
-    $ zangle tangle README.md
-    $ tree src lib
+```
+$ rm -rf src lib
+$ zangle tangle README.md
+$ tree src lib
+```
 
 List all files and tags in the document.
 
-    $ zangle ls README.md --list-tags --list-files
+```
+$ zangle ls README.md --list-tags --list-files
+```
 
 Render the content of a tag and file to stdout.
 
-    $ zangle call README.md --tag=linker --file=lib/lib.zig
+```
+$ zangle call README.md --tag=linker --file=lib/lib.zig
+```
 
 ## As a library
 
@@ -51,6 +57,8 @@ Render the content of a tag and file to stdout.
     const lib = @import("lib");
 
     [[main imports]]
+
+    pub const log_level = .info;
 
     const Options = struct {
         allow_absolute_paths: bool = false,
@@ -91,6 +99,8 @@ Render the content of a tag and file to stdout.
 
         try vm.linker.link(gpa);
 
+        log.info("processing command {s}", .{@tagName(options.command)});
+
         switch (options.command) {
             .help => unreachable,
 
@@ -127,6 +137,18 @@ Render the content of a tag and file to stdout.
                         try vm.call(gpa, tag, *FileContext, &context);
                     },
                 };
+
+                try context.stream.flush();
+            },
+
+            .graphviz => {
+                var context = GraphvizContext.init(gpa, stdout);
+
+                try context.begin();
+                for (vm.linker.files.keys()) |path| {
+                    try vm.callFile(gpa, path, *GraphvizContext, &context);
+                }
+                try context.end();
 
                 try context.stream.flush();
             },
@@ -186,12 +208,14 @@ TODO: js example using zangle
         tangle,
         ls,
         call,
+        graphviz,
 
         pub const map = std.ComptimeStringMap(Command, .{
             .{ "help", .help },
             .{ "tangle", .tangle },
             .{ "ls", .ls },
             .{ "call", .call },
+            .{ "graphviz", .graphviz },
         });
     };
 
@@ -236,12 +260,17 @@ TODO: js example using zangle
         \\  --tag=[tagname]    Render tag block to stdout
     ;
 
+    const graphviz_help =
+        \\Usage: zangle graphviz [files]
+    ;
+
     const log = std.log;
 
     fn helpGeneric() void {
         log.info(tangle_help, .{});
         log.info(ls_help, .{});
         log.info(call_help, .{});
+        log.info(graphviz_help, .{});
     }
 
     fn help(com: ?Command, name: ?[]const u8) void {
@@ -256,6 +285,7 @@ TODO: js example using zangle
             .tangle => log.info(tangle_help, .{}),
             .ls => log.info(ls_help, .{}),
             .call => log.info(call_help, .{}),
+            .graphviz => log.info(graphviz_help, .{}),
         }
     }
 
@@ -317,6 +347,8 @@ TODO: js example using zangle
                         else => return error.@"Unknown command-line flag",
                     },
 
+                    .graphviz => return error.@"Unknown command-line flag",
+
                     .tangle => switch (flag) {
                         .allow_absolute_paths => options.allow_absolute_paths = true,
                         .omit_trailing_newline => options.omit_trailing_newline = true,
@@ -360,7 +392,7 @@ TODO: js example using zangle
 
         if (fs.path.dirname(path)) |dir| try fs.cwd().makePath(dir);
 
-        log.debug("writing file: {s}", .{filename});
+        log.info("writing file: {s}", .{filename});
         return try fs.cwd().createFile(path, .{ .truncate = true });
     }
 
@@ -388,6 +420,128 @@ TODO: js example using zangle
         pub fn indent(self: *FileContext, len: u16) !void {
             const writer = self.stream.writer();
             try writer.writeByteNTimes(' ', len);
+        }
+    };
+
+    const GraphvizContext = struct {
+        stream: Stream,
+        stack: Stack = .{},
+        omit: Omit = .{},
+        gpa: *Allocator,
+        colour: u8 = 0,
+        target: Target = .{},
+
+        pub const Stack = ArrayList(Layer);
+        pub const Layer = struct {
+            list: ArrayList([]const u8) = .{},
+        };
+
+        pub const Target = HashMap([*]const u8, u8);
+
+        pub const Omit = HashMap(Pair, void);
+        pub const Pair = struct {
+            from: [*]const u8,
+            to: [*]const u8,
+        };
+
+        pub const Stream = io.BufferedWriter(1024, std.fs.File.Writer);
+
+        pub fn init(gpa: *Allocator, writer: fs.File.Writer) GraphvizContext {
+            return .{
+                .stream = .{ .unbuffered_writer = writer },
+                .gpa = gpa,
+            };
+        }
+
+        pub fn begin(self: *GraphvizContext) !void {
+            try self.stream.writer().writeAll(
+                \\graph G {
+                \\    overlap = false;
+                \\    rankdir = LR;
+                \\    concentrate = true;
+                \\    node[shape = rectangle, color = "#92abc9"];
+                \\
+            );
+            try self.stack.append(self.gpa, .{});
+        }
+
+        pub fn end(self: *GraphvizContext) !void {
+            try self.stream.writer().writeAll("}\n");
+        }
+
+        pub fn call(self: *GraphvizContext, ip: u32, module: u16, indent: u16) !void {
+            _ = ip;
+            _ = module;
+            _ = indent;
+            try self.stack.append(self.gpa, .{});
+        }
+
+        pub fn ret(self: *GraphvizContext, ip: u32, module: u16, indent: u16, name: []const u8) !void {
+            _ = ip;
+            _ = module;
+            _ = indent;
+
+            try self.render(name);
+
+            var old = self.stack.pop();
+            old.list.deinit(self.gpa);
+
+            try self.stack.items[self.stack.items.len - 1].list.append(self.gpa, name);
+        }
+
+        pub fn terminate(self: *GraphvizContext, name: []const u8) !void {
+            try self.render(name);
+
+            self.stack.items[0].list.clearRetainingCapacity();
+
+            assert(self.stack.items.len == 1);
+        }
+
+        const colours: []const u24 = &.{
+            0xdf4d77,
+            0x2288ed,
+            0x94bd76,
+            0xc678dd,
+            0x61aeee,
+            0xe3bd79,
+        };
+
+        fn render(self: *GraphvizContext, name: []const u8) !void {
+            const writer = self.stream.writer();
+            const sub_nodes = self.stack.items[self.stack.items.len - 1].list.items;
+
+            var valid: usize = 0;
+            for (sub_nodes) |sub| {
+                if (!self.omit.contains(.{ .from = name.ptr, .to = sub.ptr })) {
+                    valid += 1;
+                }
+            }
+
+            if (valid == 0) {
+                try writer.print("    \"{s}\";", .{name});
+            } else {
+                for (sub_nodes) |sub| {
+                    const entry = try self.omit.getOrPut(self.gpa, .{
+                        .from = name.ptr,
+                        .to = sub.ptr,
+                    });
+
+                    if (!entry.found_existing) {
+                        const colour = try self.target.getOrPut(self.gpa, sub.ptr);
+                        if (!colour.found_existing) {
+                            colour.value_ptr.* = self.colour;
+                            self.colour +%= 1;
+                        }
+
+                        try writer.print("    \"{s}\" -- ", .{name});
+                        try writer.print("\"{s}\"[color = \"#{x:0>6}\"]", .{
+                            sub,
+                            colours[colour.value_ptr.* % colours.len],
+                        });
+                        try writer.writeAll(";\n");
+                    }
+                }
+            }
         }
     };
 
@@ -491,7 +645,11 @@ bound.
     lang: zig esc: none tag: #instruction list
     ------------------------------------------
 
-    pub const Ret = u64;
+    pub const Ret = extern struct {
+        start: u32,
+        len: u16,
+        pad: u16 = 0,
+    };
 
 
 <!-- -->
@@ -502,11 +660,12 @@ bound.
     fn emitRet(
         p: *Parser,
         gpa: *Allocator,
+        params: Instruction.Data.Ret,
     ) !void {
         log.debug("emitting ret", .{});
         try p.obj.program.append(gpa, .{
             .opcode = .ret,
-            .data = .{ .ret = 0xffff_ffff },
+            .data = .{ .ret = params },
         });
     }
 
@@ -951,7 +1110,7 @@ Rendering is handled by passing interpreters
         vm.ip += 1;
 
         switch (opcode[index]) {
-            .ret => return vm.execRet(T, eval),
+            .ret => return try vm.execRet(T, data[index].ret, eval),
             .jmp => try vm.execJmp(T, data[index].jmp, eval),
             .call => try vm.execCall(T, data[index].call, gpa, eval),
             .shell => vm.execShell(T, data[index].shell, object.text, eval),
@@ -968,7 +1127,10 @@ Rendering is handled by passing interpreters
     lang: zig esc: none tag: #interpreter step
     ------------------------------------------
 
-    fn execRet(vm: *Interpreter, comptime T: type, eval: T) bool {
+    fn execRet(vm: *Interpreter, comptime T: type, data: Instruction.Data.Ret, eval: T) !bool {
+        const name = vm.linker.objects.items[vm.module - 1]
+            .text[data.start .. data.start + data.len];
+
         if (vm.stack.popOrNull()) |location| {
             const mod = vm.module;
             const ip = vm.ip;
@@ -977,21 +1139,29 @@ Rendering is handled by passing interpreters
             vm.module = location.value.module;
             vm.indent -= location.value.indent;
 
-            if (@hasDecl(Child(T), "ret")) try eval.ret(vm.ip, vm.module, vm.indent);
-            log.debug("[mod {d} ip {x:0>8}] ret(mod {d}, ip {x:0>8})", .{
+            if (@hasDecl(Child(T), "ret")) try eval.ret(
+                vm.ip,
+                vm.module,
+                vm.indent,
+                name,
+            );
+            log.debug("[mod {d} ip {x:0>8}] ret(mod {d}, ip {x:0>8}, indent {d}, identifier '{s}')", .{
                 mod,
                 ip,
                 vm.module,
                 vm.ip,
+                vm.indent,
+                name,
             });
 
             return true;
         }
 
-        if (@hasDecl(Child(T), "terminate")) try eval.terminate();
-        log.debug("[mod {d} ip {x:0>8}] terminate()", .{
+        if (@hasDecl(Child(T), "terminate")) try eval.terminate(name);
+        log.debug("[mod {d} ip {x:0>8}] terminate(identifier '{s}')", .{
             vm.module,
             vm.ip,
+            name,
         });
 
         return false;
@@ -1726,8 +1896,17 @@ start at the end. This allows the user to click through to the next block.
     const Header = struct {
         language: []const u8,
         delimiter: ?[]const u8,
-        resource: []const u8,
+        resource: Slice,
         type: Type,
+
+        pub const Slice = struct {
+            start: u32,
+            len: u16,
+
+            pub fn slice(self: Slice, text: []const u8) []const u8 {
+                return text[self.start .. self.start + self.len];
+            }
+        };
 
         pub const Type = enum { file, tag };
     };
@@ -1866,7 +2045,11 @@ start at the end. This allows the user to click through to the next block.
             return error.@"Expected a newline after the header";
         };
 
-        header.resource = p.slice(start, nl.start);
+        header.resource = .{
+            .start = @intCast(u32, start),
+            .len = @intCast(u16, nl.start - start),
+        };
+
         if (header.resource.len == 0) {
             switch (header.type) {
                 .file => return error.@"Missing file name",
@@ -1897,10 +2080,14 @@ start at the end. This allows the user to click through to the next block.
     }
 
     test "parse header line" {
+        const complete_header = "lang: zig esc: {{}} tag: #hash\n    ------------------------------\n\n";
         const common: Header = .{
             .language = "zig",
             .delimiter = "{{}}",
-            .resource = "hash",
+            .resource = .{
+                .start = @intCast(u32, mem.indexOf(u8, complete_header, "hash").?),
+                .len = 4,
+            },
             .type = .tag,
         };
 
@@ -2044,7 +2231,7 @@ start at the end. This allows the user to click through to the next block.
             testParseHeader("lang: zig esc: {{}} tag: #hash\n    ------------------------------\n", common),
         );
 
-        try testParseHeader("lang: zig esc: {{}} tag: #hash\n    ------------------------------\n\n", common);
+        try testParseHeader(complete_header, common);
     }
 
     fn testParseHeader(text: []const u8, expected: Header) !void {
@@ -2061,7 +2248,7 @@ start at the end. This allows the user to click through to the next block.
             return error.@"Expected delimiter to not be null";
         }
 
-        testing.expectEqualStrings(expected.resource, header.resource) catch return error.@"Resource is not the same";
+        testing.expectEqual(expected.resource, header.resource) catch return error.@"Resource is not the same";
         testing.expectEqual(expected.type, header.type) catch return error.@"Type is not the same";
     }
 
@@ -2139,7 +2326,7 @@ TODO: link tags to their definition
 
         switch (header.type) {
             .tag => {
-                const adj = try p.obj.adjacent.getOrPut(gpa, header.resource);
+                const adj = try p.obj.adjacent.getOrPut(gpa, header.resource.slice(p.it.bytes));
                 if (adj.found_existing) {
                     try p.writeJmp(adj.value_ptr.exit, .{
                         .address = entry_point,
@@ -2153,13 +2340,16 @@ TODO: link tags to their definition
             },
 
             .file => {
-                const file = try p.obj.files.getOrPut(gpa, header.resource);
+                const file = try p.obj.files.getOrPut(gpa, header.resource.slice(p.it.bytes));
                 if (file.found_existing) return error.@"Multiple file outputs with the same name";
                 file.value_ptr.* = entry_point;
             },
         }
 
-        try p.emitRet(gpa);
+        try p.emitRet(gpa, .{
+            .start = header.resource.start,
+            .len = header.resource.len,
+        });
     }
 
 Delimiters
@@ -2311,7 +2501,7 @@ Pipes pass code blocks through external programs.
         try p.parseBody(testing.allocator, .{
             .language = "",
             .delimiter = "<<>>",
-            .resource = "",
+            .resource = .{ .start = 0, .len = 0 },
             .type = .tag,
         });
     }
@@ -2330,7 +2520,7 @@ Pipes pass code blocks through external programs.
         try p.parseBody(testing.allocator, .{
             .language = "",
             .delimiter = "<<>>",
-            .resource = "foo",
+            .resource = .{ .start = 0, .len = 0 },
             .type = .tag,
         });
 

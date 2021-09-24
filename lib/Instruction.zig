@@ -22,7 +22,11 @@ pub const Data = extern union {
     shell: Shell,
     write: Write,
 
-    pub const Ret = u64;
+    pub const Ret = extern struct {
+        start: u32,
+        len: u16,
+        pad: u16 = 0,
+    };
     pub const Jmp = extern struct {
         address: u32,
         module: u16,

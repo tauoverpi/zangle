@@ -19,11 +19,12 @@ const log = std.log.scoped(.parser);
 fn emitRet(
     p: *Parser,
     gpa: *Allocator,
+    params: Instruction.Data.Ret,
 ) !void {
     log.debug("emitting ret", .{});
     try p.obj.program.append(gpa, .{
         .opcode = .ret,
-        .data = .{ .ret = 0xffff_ffff },
+        .data = .{ .ret = params },
     });
 }
 fn writeJmp(
@@ -153,8 +154,17 @@ pub fn match(p: *Parser, tag: Token.Tag, text: []const u8) ?void {
 const Header = struct {
     language: []const u8,
     delimiter: ?[]const u8,
-    resource: []const u8,
+    resource: Slice,
     type: Type,
+
+    pub const Slice = struct {
+        start: u32,
+        len: u16,
+
+        pub fn slice(self: Slice, text: []const u8) []const u8 {
+            return text[self.start .. self.start + self.len];
+        }
+    };
 
     pub const Type = enum { file, tag };
 };
@@ -293,7 +303,11 @@ fn parseHeaderLine(p: *Parser) ParseHeaderError!Header {
         return error.@"Expected a newline after the header";
     };
 
-    header.resource = p.slice(start, nl.start);
+    header.resource = .{
+        .start = @intCast(u32, start),
+        .len = @intCast(u16, nl.start - start),
+    };
+
     if (header.resource.len == 0) {
         switch (header.type) {
             .file => return error.@"Missing file name",
@@ -324,10 +338,14 @@ fn parseHeaderLine(p: *Parser) ParseHeaderError!Header {
 }
 
 test "parse header line" {
+    const complete_header = "lang: zig esc: {{}} tag: #hash\n    ------------------------------\n\n";
     const common: Header = .{
         .language = "zig",
         .delimiter = "{{}}",
-        .resource = "hash",
+        .resource = .{
+            .start = @intCast(u32, mem.indexOf(u8, complete_header, "hash").?),
+            .len = 4,
+        },
         .type = .tag,
     };
 
@@ -471,7 +489,7 @@ test "parse header line" {
         testParseHeader("lang: zig esc: {{}} tag: #hash\n    ------------------------------\n", common),
     );
 
-    try testParseHeader("lang: zig esc: {{}} tag: #hash\n    ------------------------------\n\n", common);
+    try testParseHeader(complete_header, common);
 }
 
 fn testParseHeader(text: []const u8, expected: Header) !void {
@@ -488,7 +506,7 @@ fn testParseHeader(text: []const u8, expected: Header) !void {
         return error.@"Expected delimiter to not be null";
     }
 
-    testing.expectEqualStrings(expected.resource, header.resource) catch return error.@"Resource is not the same";
+    testing.expectEqual(expected.resource, header.resource) catch return error.@"Resource is not the same";
     testing.expectEqual(expected.type, header.type) catch return error.@"Type is not the same";
 }
 fn parseBody(p: *Parser, gpa: *Allocator, header: Header) !void {
@@ -559,7 +577,7 @@ fn parseBody(p: *Parser, gpa: *Allocator, header: Header) !void {
 
     switch (header.type) {
         .tag => {
-            const adj = try p.obj.adjacent.getOrPut(gpa, header.resource);
+            const adj = try p.obj.adjacent.getOrPut(gpa, header.resource.slice(p.it.bytes));
             if (adj.found_existing) {
                 try p.writeJmp(adj.value_ptr.exit, .{
                     .address = entry_point,
@@ -573,13 +591,16 @@ fn parseBody(p: *Parser, gpa: *Allocator, header: Header) !void {
         },
 
         .file => {
-            const file = try p.obj.files.getOrPut(gpa, header.resource);
+            const file = try p.obj.files.getOrPut(gpa, header.resource.slice(p.it.bytes));
             if (file.found_existing) return error.@"Multiple file outputs with the same name";
             file.value_ptr.* = entry_point;
         },
     }
 
-    try p.emitRet(gpa);
+    try p.emitRet(gpa, .{
+        .start = header.resource.start,
+        .len = header.resource.len,
+    });
 }
 fn parseDelimiter(
     p: *Parser,
@@ -711,7 +732,7 @@ test "parse body" {
     try p.parseBody(testing.allocator, .{
         .language = "",
         .delimiter = "<<>>",
-        .resource = "",
+        .resource = .{ .start = 0, .len = 0 },
         .type = .tag,
     });
 }
@@ -730,7 +751,7 @@ test "compile single tag" {
     try p.parseBody(testing.allocator, .{
         .language = "",
         .delimiter = "<<>>",
-        .resource = "foo",
+        .resource = .{ .start = 0, .len = 0 },
         .type = .tag,
     });
 

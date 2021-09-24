@@ -37,7 +37,7 @@ pub fn step(vm: *Interpreter, gpa: *Allocator, comptime T: type, eval: T) !bool 
     vm.ip += 1;
 
     switch (opcode[index]) {
-        .ret => return vm.execRet(T, eval),
+        .ret => return try vm.execRet(T, data[index].ret, eval),
         .jmp => try vm.execJmp(T, data[index].jmp, eval),
         .call => try vm.execCall(T, data[index].call, gpa, eval),
         .shell => vm.execShell(T, data[index].shell, object.text, eval),
@@ -240,7 +240,10 @@ pub fn callFile(vm: *Interpreter, gpa: *Allocator, symbol: []const u8, comptime 
         while (try vm.step(gpa, T, eval)) {}
     } else return error.@"Unknown procedure";
 }
-fn execRet(vm: *Interpreter, comptime T: type, eval: T) bool {
+fn execRet(vm: *Interpreter, comptime T: type, data: Instruction.Data.Ret, eval: T) !bool {
+    const name = vm.linker.objects.items[vm.module - 1]
+        .text[data.start .. data.start + data.len];
+
     if (vm.stack.popOrNull()) |location| {
         const mod = vm.module;
         const ip = vm.ip;
@@ -249,21 +252,29 @@ fn execRet(vm: *Interpreter, comptime T: type, eval: T) bool {
         vm.module = location.value.module;
         vm.indent -= location.value.indent;
 
-        if (@hasDecl(Child(T), "ret")) try eval.ret(vm.ip, vm.module, vm.indent);
-        log.debug("[mod {d} ip {x:0>8}] ret(mod {d}, ip {x:0>8})", .{
+        if (@hasDecl(Child(T), "ret")) try eval.ret(
+            vm.ip,
+            vm.module,
+            vm.indent,
+            name,
+        );
+        log.debug("[mod {d} ip {x:0>8}] ret(mod {d}, ip {x:0>8}, indent {d}, identifier '{s}')", .{
             mod,
             ip,
             vm.module,
             vm.ip,
+            vm.indent,
+            name,
         });
 
         return true;
     }
 
-    if (@hasDecl(Child(T), "terminate")) try eval.terminate();
-    log.debug("[mod {d} ip {x:0>8}] terminate()", .{
+    if (@hasDecl(Child(T), "terminate")) try eval.terminate(name);
+    log.debug("[mod {d} ip {x:0>8}] terminate(identifier '{s}')", .{
         vm.module,
         vm.ip,
+        name,
     });
 
     return false;

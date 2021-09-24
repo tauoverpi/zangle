@@ -20,6 +20,8 @@ const Linker = lib.Linker;
 const Instruction = lib.Instruction;
 const Interpreter = lib.Interpreter;
 
+pub const log_level = .info;
+
 const Options = struct {
     allow_absolute_paths: bool = false,
     omit_trailing_newline: bool = false,
@@ -39,12 +41,14 @@ const Command = enum {
     tangle,
     ls,
     call,
+    graphviz,
 
     pub const map = std.ComptimeStringMap(Command, .{
         .{ "help", .help },
         .{ "tangle", .tangle },
         .{ "ls", .ls },
         .{ "call", .call },
+        .{ "graphviz", .graphviz },
     });
 };
 
@@ -89,12 +93,17 @@ const call_help =
     \\  --tag=[tagname]    Render tag block to stdout
 ;
 
+const graphviz_help =
+    \\Usage: zangle graphviz [files]
+;
+
 const log = std.log;
 
 fn helpGeneric() void {
     log.info(tangle_help, .{});
     log.info(ls_help, .{});
     log.info(call_help, .{});
+    log.info(graphviz_help, .{});
 }
 
 fn help(com: ?Command, name: ?[]const u8) void {
@@ -109,6 +118,7 @@ fn help(com: ?Command, name: ?[]const u8) void {
         .tangle => log.info(tangle_help, .{}),
         .ls => log.info(ls_help, .{}),
         .call => log.info(call_help, .{}),
+        .graphviz => log.info(graphviz_help, .{}),
     }
 }
 
@@ -170,6 +180,8 @@ fn parseCli(gpa: *Allocator, objects: *Linker.Object.List) !?Options {
                     else => return error.@"Unknown command-line flag",
                 },
 
+                .graphviz => return error.@"Unknown command-line flag",
+
                 .tangle => switch (flag) {
                     .allow_absolute_paths => options.allow_absolute_paths = true,
                     .omit_trailing_newline => options.omit_trailing_newline = true,
@@ -212,6 +224,128 @@ const FileContext = struct {
     }
 };
 
+const GraphvizContext = struct {
+    stream: Stream,
+    stack: Stack = .{},
+    omit: Omit = .{},
+    gpa: *Allocator,
+    colour: u8 = 0,
+    target: Target = .{},
+
+    pub const Stack = ArrayList(Layer);
+    pub const Layer = struct {
+        list: ArrayList([]const u8) = .{},
+    };
+
+    pub const Target = HashMap([*]const u8, u8);
+
+    pub const Omit = HashMap(Pair, void);
+    pub const Pair = struct {
+        from: [*]const u8,
+        to: [*]const u8,
+    };
+
+    pub const Stream = io.BufferedWriter(1024, std.fs.File.Writer);
+
+    pub fn init(gpa: *Allocator, writer: fs.File.Writer) GraphvizContext {
+        return .{
+            .stream = .{ .unbuffered_writer = writer },
+            .gpa = gpa,
+        };
+    }
+
+    pub fn begin(self: *GraphvizContext) !void {
+        try self.stream.writer().writeAll(
+            \\graph G {
+            \\    overlap = false;
+            \\    rankdir = LR;
+            \\    concentrate = true;
+            \\    node[shape = rectangle, color = "#92abc9"];
+            \\
+        );
+        try self.stack.append(self.gpa, .{});
+    }
+
+    pub fn end(self: *GraphvizContext) !void {
+        try self.stream.writer().writeAll("}\n");
+    }
+
+    pub fn call(self: *GraphvizContext, ip: u32, module: u16, indent: u16) !void {
+        _ = ip;
+        _ = module;
+        _ = indent;
+        try self.stack.append(self.gpa, .{});
+    }
+
+    pub fn ret(self: *GraphvizContext, ip: u32, module: u16, indent: u16, name: []const u8) !void {
+        _ = ip;
+        _ = module;
+        _ = indent;
+
+        try self.render(name);
+
+        var old = self.stack.pop();
+        old.list.deinit(self.gpa);
+
+        try self.stack.items[self.stack.items.len - 1].list.append(self.gpa, name);
+    }
+
+    pub fn terminate(self: *GraphvizContext, name: []const u8) !void {
+        try self.render(name);
+
+        self.stack.items[0].list.clearRetainingCapacity();
+
+        assert(self.stack.items.len == 1);
+    }
+
+    const colours: []const u24 = &.{
+        0xdf4d77,
+        0x2288ed,
+        0x94bd76,
+        0xc678dd,
+        0x61aeee,
+        0xe3bd79,
+    };
+
+    fn render(self: *GraphvizContext, name: []const u8) !void {
+        const writer = self.stream.writer();
+        const sub_nodes = self.stack.items[self.stack.items.len - 1].list.items;
+
+        var valid: usize = 0;
+        for (sub_nodes) |sub| {
+            if (!self.omit.contains(.{ .from = name.ptr, .to = sub.ptr })) {
+                valid += 1;
+            }
+        }
+
+        if (valid == 0) {
+            try writer.print("    \"{s}\";", .{name});
+        } else {
+            for (sub_nodes) |sub| {
+                const entry = try self.omit.getOrPut(self.gpa, .{
+                    .from = name.ptr,
+                    .to = sub.ptr,
+                });
+
+                if (!entry.found_existing) {
+                    const colour = try self.target.getOrPut(self.gpa, sub.ptr);
+                    if (!colour.found_existing) {
+                        colour.value_ptr.* = self.colour;
+                        self.colour +%= 1;
+                    }
+
+                    try writer.print("    \"{s}\" -- ", .{name});
+                    try writer.print("\"{s}\"[color = \"#{x:0>6}\"]", .{
+                        sub,
+                        colours[colour.value_ptr.* % colours.len],
+                    });
+                    try writer.writeAll(";\n");
+                }
+            }
+        }
+    }
+};
+
 pub fn main() void {
     run() catch |err| {
         log.err("{s}", .{@errorName(err)});
@@ -232,6 +366,8 @@ pub fn run() !void {
     log.info("linking {d} {s}...", .{ n_objects, plural });
 
     try vm.linker.link(gpa);
+
+    log.info("processing command {s}", .{@tagName(options.command)});
 
     switch (options.command) {
         .help => unreachable,
@@ -273,6 +409,18 @@ pub fn run() !void {
             try context.stream.flush();
         },
 
+        .graphviz => {
+            var context = GraphvizContext.init(gpa, stdout);
+
+            try context.begin();
+            for (vm.linker.files.keys()) |path| {
+                try vm.callFile(gpa, path, *GraphvizContext, &context);
+            }
+            try context.end();
+
+            try context.stream.flush();
+        },
+
         .tangle => for (vm.linker.files.keys()) |path| {
             const file = try createFile(path, options);
             defer file.close();
@@ -304,6 +452,6 @@ fn createFile(path: []const u8, options: Options) !fs.File {
 
     if (fs.path.dirname(path)) |dir| try fs.cwd().makePath(dir);
 
-    log.debug("writing file: {s}", .{filename});
+    log.info("writing file: {s}", .{filename});
     return try fs.cwd().createFile(path, .{ .truncate = true });
 }
