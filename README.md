@@ -722,6 +722,8 @@ blocks (by tag name) together into one.
 
 ## Instructions
 
+Each instruction consists of an 8-bit opcode along with a 64-bit data argument.
+
 ### Ret
 
 Pops the location and module in which the matching `call` instruction

@@ -22,10 +22,6 @@ pub const Data = extern union {
     shell: Shell,
     write: Write,
 
-    pub const Halt = extern struct {
-        entry: u32,
-        pad: u32,
-    };
     pub const Ret = extern struct {
         start: u32,
         len: u16,

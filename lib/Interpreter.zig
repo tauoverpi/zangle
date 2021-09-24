@@ -47,10 +47,6 @@ pub fn step(vm: *Interpreter, gpa: *Allocator, comptime T: type, eval: T) !bool 
     return true;
 }
 
-fn execHalt(vm: *Interpreter, comptime T: type, data: Instruction.Data.Halt, eval: T) !void {
-    _ = vm;
-    if (@hasDecl(Child(T), "halt")) try eval.vm(data);
-}
 fn execRet(vm: *Interpreter, comptime T: type, data: Instruction.Data.Ret, eval: T) !bool {
     const name = vm.linker.objects.items[vm.module - 1]
         .text[data.start .. data.start + data.len];
