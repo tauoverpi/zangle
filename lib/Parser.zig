@@ -11,10 +11,22 @@ const Instruction = lib.Instruction;
 const Parser = @This();
 
 it: Tokenizer,
-obj: Linker.Object,
+program: Instruction.List = .{},
+symbols: Linker.Object.SymbolMap = .{},
+adjacent: Linker.Object.AdjacentMap = .{},
+files: Linker.Object.FileMap = .{},
 
 const Token = Tokenizer.Token;
 const log = std.log.scoped(.parser);
+
+pub fn deinit(p: *Parser, gpa: *Allocator) void {
+    p.program.deinit(gpa);
+    for (p.symbols.values()) |*entry| entry.deinit(gpa);
+    p.symbols.deinit(gpa);
+    p.adjacent.deinit(gpa);
+    p.files.deinit(gpa);
+    p.* = undefined;
+}
 
 fn emitRet(
     p: *Parser,
@@ -22,7 +34,7 @@ fn emitRet(
     params: Instruction.Data.Ret,
 ) !void {
     log.debug("emitting ret", .{});
-    try p.obj.program.append(gpa, .{
+    try p.program.append(gpa, .{
         .opcode = .ret,
         .data = .{ .ret = params },
     });
@@ -36,7 +48,7 @@ fn writeJmp(
         location,
         params.address,
     });
-    p.obj.program.set(location, .{
+    p.program.set(location, .{
         .opcode = .jmp,
         .data = .{ .jmp = params },
     });
@@ -48,14 +60,14 @@ fn emitCall(
     params: Instruction.Data.Call,
 ) !void {
     log.debug("emitting call to {s}", .{tag});
-    const result = try p.obj.symbols.getOrPut(gpa, tag);
+    const result = try p.symbols.getOrPut(gpa, tag);
     if (!result.found_existing) {
         result.value_ptr.* = .{};
     }
 
-    try result.value_ptr.append(gpa, @intCast(u32, p.obj.program.len));
+    try result.value_ptr.append(gpa, @intCast(u32, p.program.len));
 
-    try p.obj.program.append(gpa, .{
+    try p.program.append(gpa, .{
         .opcode = .call,
         .data = .{ .call = params },
     });
@@ -66,7 +78,7 @@ fn emitShell(
     params: Instruction.Data.Shell,
 ) !void {
     log.debug("emitting shell command", .{});
-    try p.obj.program.append(gpa, .{
+    try p.program.append(gpa, .{
         .opcode = .shell,
         .data = .{ .shell = params },
     });
@@ -81,7 +93,7 @@ fn emitWrite(
         params.len,
         params.nl,
     });
-    try p.obj.program.append(gpa, .{
+    try p.program.append(gpa, .{
         .opcode = .write,
         .data = .{ .write = params },
     });
@@ -493,7 +505,7 @@ test "parse header line" {
 }
 
 fn testParseHeader(text: []const u8, expected: Header) !void {
-    var p: Parser = .{ .it = .{ .bytes = text }, .obj = .{ .text = text } };
+    var p: Parser = .{ .it = .{ .bytes = text } };
     const header = try p.parseHeaderLine();
 
     testing.expectEqualStrings(expected.language, header.language) catch return error.@"Language is not the same";
@@ -513,7 +525,7 @@ fn parseBody(p: *Parser, gpa: *Allocator, header: Header) !void {
     log.debug("begin parsing body", .{});
     defer log.debug("end parsing body", .{});
 
-    const entry_point = @intCast(u32, p.obj.program.len);
+    const entry_point = @intCast(u32, p.program.len);
 
     var nl: usize = 0;
     while (p.eat(.space, @src())) |space| {
@@ -564,11 +576,11 @@ fn parseBody(p: *Parser, gpa: *Allocator, header: Header) !void {
         };
     }
 
-    const len = p.obj.program.len;
+    const len = p.program.len;
     if (len != 0) {
-        const item = &p.obj.program.items(.data)[len - 1].write;
+        const item = &p.program.items(.data)[len - 1].write;
         item.nl = 0;
-        if (item.len == 0) p.obj.program.len -= 1;
+        if (item.len == 0) p.program.len -= 1;
     }
 
     if (nl < 2) {
@@ -577,7 +589,7 @@ fn parseBody(p: *Parser, gpa: *Allocator, header: Header) !void {
 
     switch (header.type) {
         .tag => {
-            const adj = try p.obj.adjacent.getOrPut(gpa, header.resource.slice(p.it.bytes));
+            const adj = try p.adjacent.getOrPut(gpa, header.resource.slice(p.it.bytes));
             if (adj.found_existing) {
                 try p.writeJmp(adj.value_ptr.exit, .{
                     .address = entry_point,
@@ -587,11 +599,11 @@ fn parseBody(p: *Parser, gpa: *Allocator, header: Header) !void {
                 adj.value_ptr.entry = entry_point;
             }
 
-            adj.value_ptr.exit = @intCast(u32, p.obj.program.len);
+            adj.value_ptr.exit = @intCast(u32, p.program.len);
         },
 
         .file => {
-            const file = try p.obj.files.getOrPut(gpa, header.resource.slice(p.it.bytes));
+            const file = try p.files.getOrPut(gpa, header.resource.slice(p.it.bytes));
             if (file.found_existing) return error.@"Multiple file outputs with the same name";
             file.value_ptr.* = entry_point;
         },
@@ -686,12 +698,9 @@ fn parseDelimiter(
 }
 
 pub fn parse(gpa: *Allocator, text: []const u8) !Linker.Object {
-    var p: Parser = .{
-        .it = .{ .bytes = text },
-        .obj = .{ .text = text },
-    };
+    var p: Parser = .{ .it = .{ .bytes = text } };
 
-    errdefer p.obj.deinit(gpa);
+    errdefer p.deinit(gpa);
 
     var code_block = false;
     while (p.next()) |token| {
@@ -712,7 +721,13 @@ pub fn parse(gpa: *Allocator, text: []const u8) !Linker.Object {
         }
     }
 
-    return p.obj;
+    return Linker.Object{
+        .text = text,
+        .program = p.program,
+        .symbols = p.symbols,
+        .adjacent = p.adjacent,
+        .files = p.files,
+    };
 }
 
 test "parse body" {
@@ -727,8 +742,8 @@ test "parse body" {
         \\text
     ;
 
-    var p: Parser = .{ .it = .{ .bytes = text }, .obj = .{ .text = text } };
-    defer p.obj.deinit(testing.allocator);
+    var p: Parser = .{ .it = .{ .bytes = text } };
+    defer p.deinit(testing.allocator);
     try p.parseBody(testing.allocator, .{
         .language = "",
         .delimiter = "<<>>",
@@ -746,8 +761,8 @@ test "compile single tag" {
         \\end
     ;
 
-    var p: Parser = .{ .it = .{ .bytes = text }, .obj = .{ .text = text } };
-    defer p.obj.deinit(testing.allocator);
+    var p: Parser = .{ .it = .{ .bytes = text } };
+    defer p.deinit(testing.allocator);
     try p.parseBody(testing.allocator, .{
         .language = "",
         .delimiter = "<<>>",
@@ -755,9 +770,9 @@ test "compile single tag" {
         .type = .tag,
     });
 
-    try testing.expect(p.obj.symbols.contains("a b c"));
-    try testing.expect(p.obj.symbols.contains("1 2 3"));
-    try testing.expect(p.obj.symbols.contains(". . ."));
+    try testing.expect(p.symbols.contains("a b c"));
+    try testing.expect(p.symbols.contains("1 2 3"));
+    try testing.expect(p.symbols.contains(". . ."));
 }
 
 const TestCompileResult = struct {

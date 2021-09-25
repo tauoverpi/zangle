@@ -228,6 +228,7 @@ TODO: js example using zangle
     const Linker = lib.Linker;
     const Instruction = lib.Instruction;
     const Interpreter = lib.Interpreter;
+    const GraphContext = @import("GraphContext.zig");
 
 ## Parsing
 
@@ -495,144 +496,157 @@ TODO: js example using zangle
         }
     };
 
-    const GraphContext = struct {
-        stream: Stream,
-        stack: Stack = .{},
-        omit: Omit = .{},
-        gpa: *Allocator,
-        colour: u8 = 0,
-        target: Target = .{},
-        text_colour: u24 = 0,
+<!-- -->
+
+    lang: zig esc: none file: src/GraphContext.zig
+    ----------------------------------------------
+
+    const std = @import("std");
+    const io = std.io;
+    const fs = std.fs;
+    const assert = std.debug.assert;
+
+    const Allocator = std.mem.Allocator;
+    const ArrayList = std.ArrayListUnmanaged;
+    const HashMap = std.AutoHashMapUnmanaged;
+    const GraphContext = @This();
+
+    stream: Stream,
+    stack: Stack = .{},
+    omit: Omit = .{},
+    gpa: *Allocator,
+    colour: u8 = 0,
+    target: Target = .{},
+    text_colour: u24 = 0,
+    colours: []const u24 = &.{},
+
+    pub const Stack = ArrayList(Layer);
+    pub const Layer = struct {
+        list: ArrayList([]const u8) = .{},
+    };
+
+    pub const Target = HashMap([*]const u8, u8);
+
+    pub const Omit = HashMap(Pair, void);
+    pub const Pair = struct {
+        from: [*]const u8,
+        to: [*]const u8,
+    };
+
+    pub const Stream = io.BufferedWriter(1024, std.fs.File.Writer);
+
+    pub fn init(gpa: *Allocator, writer: fs.File.Writer) GraphContext {
+        return .{
+            .stream = .{ .unbuffered_writer = writer },
+            .gpa = gpa,
+        };
+    }
+
+    pub const GraphOptions = struct {
+        border: u24 = 0,
+        background: u24 = 0,
+        text: u24 = 0,
         colours: []const u24 = &.{},
+    };
 
-        pub const Stack = ArrayList(Layer);
-        pub const Layer = struct {
-            list: ArrayList([]const u8) = .{},
-        };
+    pub fn begin(self: *GraphContext, options: GraphOptions) !void {
+        try self.stream.writer().print(
+            \\graph G {{
+            \\    bgcolor = "#{[background]x:0>6}";
+            \\    overlap = false;
+            \\    rankdir = LR;
+            \\    concentrate = true;
+            \\    node[shape = rectangle, color = "#{[border]x:0>6}"];
+            \\
+        , .{
+            .background = options.background,
+            .border = options.border,
+        });
 
-        pub const Target = HashMap([*]const u8, u8);
+        try self.stack.append(self.gpa, .{});
 
-        pub const Omit = HashMap(Pair, void);
-        pub const Pair = struct {
-            from: [*]const u8,
-            to: [*]const u8,
-        };
+        self.colours = options.colours;
+        self.text_colour = options.text;
+    }
 
-        pub const Stream = io.BufferedWriter(1024, std.fs.File.Writer);
+    pub fn end(self: *GraphContext) !void {
+        try self.stream.writer().writeAll("}\n");
+    }
 
-        pub fn init(gpa: *Allocator, writer: fs.File.Writer) GraphContext {
-            return .{
-                .stream = .{ .unbuffered_writer = writer },
-                .gpa = gpa,
-            };
+    pub fn call(self: *GraphContext, ip: u32, module: u16, indent: u16) !void {
+        _ = ip;
+        _ = module;
+        _ = indent;
+        try self.stack.append(self.gpa, .{});
+    }
+
+    pub fn ret(self: *GraphContext, ip: u32, module: u16, indent: u16, name: []const u8) !void {
+        _ = ip;
+        _ = module;
+        _ = indent;
+
+        try self.render(name);
+
+        var old = self.stack.pop();
+        old.list.deinit(self.gpa);
+
+        try self.stack.items[self.stack.items.len - 1].list.append(self.gpa, name);
+    }
+
+    pub fn terminate(self: *GraphContext, name: []const u8) !void {
+        try self.render(name);
+
+        self.stack.items[0].list.clearRetainingCapacity();
+
+        assert(self.stack.items.len == 1);
+    }
+
+    fn render(self: *GraphContext, name: []const u8) !void {
+        const writer = self.stream.writer();
+        const sub_nodes = self.stack.items[self.stack.items.len - 1].list.items;
+
+        var valid: usize = 0;
+        for (sub_nodes) |sub| {
+            if (!self.omit.contains(.{ .from = name.ptr, .to = sub.ptr })) {
+                valid += 1;
+            }
         }
 
-        pub const GraphOptions = struct {
-            border: u24 = 0,
-            background: u24 = 0,
-            text: u24 = 0,
-            colours: []const u24 = &.{},
-        };
+        const theme = try self.target.getOrPut(self.gpa, name.ptr);
+        if (!theme.found_existing) {
+            theme.value_ptr.* = self.colour;
+            self.colour +%= 1;
 
-        pub fn begin(self: *GraphContext, options: GraphOptions) !void {
-            try self.stream.writer().print(
-                \\graph G {{
-                \\    bgcolor = "#{[background]x:0>6}";
-                \\    overlap = false;
-                \\    rankdir = LR;
-                \\    concentrate = true;
-                \\    node[shape = rectangle, color = "#{[border]x:0>6}"];
+            try writer.print(
+                \\    "{[name]s}"[fontcolor = "#{[colour]x:0>6}"];
                 \\
             , .{
-                .background = options.background,
-                .border = options.border,
+                .name = name,
+                .colour = self.text_colour,
+            });
+        }
+
+        for (sub_nodes) |sub| {
+            const entry = try self.omit.getOrPut(self.gpa, .{
+                .from = name.ptr,
+                .to = sub.ptr,
             });
 
-            try self.stack.append(self.gpa, .{});
+            if (!entry.found_existing) {
+                const colour = self.target.get(sub.ptr).?;
+                const selected = if (self.colours.len == 0)
+                    0
+                else
+                    self.colours[colour % self.colours.len];
 
-            self.colours = options.colours;
-            self.text_colour = options.text;
-        }
-
-        pub fn end(self: *GraphContext) !void {
-            try self.stream.writer().writeAll("}\n");
-        }
-
-        pub fn call(self: *GraphContext, ip: u32, module: u16, indent: u16) !void {
-            _ = ip;
-            _ = module;
-            _ = indent;
-            try self.stack.append(self.gpa, .{});
-        }
-
-        pub fn ret(self: *GraphContext, ip: u32, module: u16, indent: u16, name: []const u8) !void {
-            _ = ip;
-            _ = module;
-            _ = indent;
-
-            try self.render(name);
-
-            var old = self.stack.pop();
-            old.list.deinit(self.gpa);
-
-            try self.stack.items[self.stack.items.len - 1].list.append(self.gpa, name);
-        }
-
-        pub fn terminate(self: *GraphContext, name: []const u8) !void {
-            try self.render(name);
-
-            self.stack.items[0].list.clearRetainingCapacity();
-
-            assert(self.stack.items.len == 1);
-        }
-
-        fn render(self: *GraphContext, name: []const u8) !void {
-            const writer = self.stream.writer();
-            const sub_nodes = self.stack.items[self.stack.items.len - 1].list.items;
-
-            var valid: usize = 0;
-            for (sub_nodes) |sub| {
-                if (!self.omit.contains(.{ .from = name.ptr, .to = sub.ptr })) {
-                    valid += 1;
-                }
-            }
-
-            const theme = try self.target.getOrPut(self.gpa, name.ptr);
-            if (!theme.found_existing) {
-                theme.value_ptr.* = self.colour;
-                self.colour +%= 1;
-
-                try writer.print(
-                    \\    "{[name]s}"[fontcolor = "#{[colour]x:0>6}"];
-                    \\
-                , .{
-                    .name = name,
-                    .colour = self.text_colour,
+                try writer.print("    \"{s}\" -- ", .{name});
+                try writer.print("\"{s}\"[color = \"#{x:0>6}\"];\n", .{
+                    sub,
+                    selected,
                 });
             }
-
-            for (sub_nodes) |sub| {
-                const entry = try self.omit.getOrPut(self.gpa, .{
-                    .from = name.ptr,
-                    .to = sub.ptr,
-                });
-
-                if (!entry.found_existing) {
-                    const colour = self.target.get(sub.ptr).?;
-                    const selected = if (self.colours.len == 0)
-                        0
-                    else
-                        self.colours[colour % self.colours.len];
-
-                    try writer.print("    \"{s}\" -- ", .{name});
-                    try writer.print("\"{s}\"[color = \"#{x:0>6}\"];\n", .{
-                        sub,
-                        selected,
-                    });
-                }
-            }
         }
-    };
+    }
 
 # WebAssembly interface
 
@@ -753,7 +767,7 @@ name which is provided as a parameter to rendering contexts.
         params: Instruction.Data.Ret,
     ) !void {
         log.debug("emitting ret", .{});
-        try p.obj.program.append(gpa, .{
+        try p.program.append(gpa, .{
             .opcode = .ret,
             .data = .{ .ret = params },
         });
@@ -841,7 +855,7 @@ local to the current module.
             location,
             params.address,
         });
-        p.obj.program.set(location, .{
+        p.program.set(location, .{
             .opcode = .jmp,
             .data = .{ .jmp = params },
         });
@@ -877,14 +891,14 @@ current module.
         params: Instruction.Data.Call,
     ) !void {
         log.debug("emitting call to {s}", .{tag});
-        const result = try p.obj.symbols.getOrPut(gpa, tag);
+        const result = try p.symbols.getOrPut(gpa, tag);
         if (!result.found_existing) {
             result.value_ptr.* = .{};
         }
 
-        try result.value_ptr.append(gpa, @intCast(u32, p.obj.program.len));
+        try result.value_ptr.append(gpa, @intCast(u32, p.program.len));
 
-        try p.obj.program.append(gpa, .{
+        try p.program.append(gpa, .{
             .opcode = .call,
             .data = .{ .call = params },
         });
@@ -917,7 +931,7 @@ for filtering rendered content within the given block.
         params: Instruction.Data.Shell,
     ) !void {
         log.debug("emitting shell command", .{});
-        try p.obj.program.append(gpa, .{
+        try p.program.append(gpa, .{
             .opcode = .shell,
             .data = .{ .shell = params },
         });
@@ -955,7 +969,7 @@ A trail of newline characters is emitted after the text as specified in the
             params.len,
             params.nl,
         });
-        try p.obj.program.append(gpa, .{
+        try p.program.append(gpa, .{
             .opcode = .write,
             .data = .{ .write = params },
         });
@@ -1741,10 +1755,22 @@ The default syntax consists of blocks indented by 4 spaces.
     const Parser = @This();
 
     it: Tokenizer,
-    obj: Linker.Object,
+    program: Instruction.List = .{},
+    symbols: Linker.Object.SymbolMap = .{},
+    adjacent: Linker.Object.AdjacentMap = .{},
+    files: Linker.Object.FileMap = .{},
 
     const Token = Tokenizer.Token;
     const log = std.log.scoped(.parser);
+
+    pub fn deinit(p: *Parser, gpa: *Allocator) void {
+        p.program.deinit(gpa);
+        for (p.symbols.values()) |*entry| entry.deinit(gpa);
+        p.symbols.deinit(gpa);
+        p.adjacent.deinit(gpa);
+        p.files.deinit(gpa);
+        p.* = undefined;
+    }
 
     [[zangle parser primitives]]
     [[zangle parser]]
@@ -2334,7 +2360,7 @@ start at the end. This allows the user to click through to the next block.
     }
 
     fn testParseHeader(text: []const u8, expected: Header) !void {
-        var p: Parser = .{ .it = .{ .bytes = text }, .obj = .{ .text = text } };
+        var p: Parser = .{ .it = .{ .bytes = text } };
         const header = try p.parseHeaderLine();
 
         testing.expectEqualStrings(expected.language, header.language) catch return error.@"Language is not the same";
@@ -2361,7 +2387,7 @@ TODO: link tags to their definition
         log.debug("begin parsing body", .{});
         defer log.debug("end parsing body", .{});
 
-        const entry_point = @intCast(u32, p.obj.program.len);
+        const entry_point = @intCast(u32, p.program.len);
 
         var nl: usize = 0;
         while (p.eat(.space, @src())) |space| {
@@ -2412,11 +2438,11 @@ TODO: link tags to their definition
             };
         }
 
-        const len = p.obj.program.len;
+        const len = p.program.len;
         if (len != 0) {
-            const item = &p.obj.program.items(.data)[len - 1].write;
+            const item = &p.program.items(.data)[len - 1].write;
             item.nl = 0;
-            if (item.len == 0) p.obj.program.len -= 1;
+            if (item.len == 0) p.program.len -= 1;
         }
 
         if (nl < 2) {
@@ -2425,7 +2451,7 @@ TODO: link tags to their definition
 
         switch (header.type) {
             .tag => {
-                const adj = try p.obj.adjacent.getOrPut(gpa, header.resource.slice(p.it.bytes));
+                const adj = try p.adjacent.getOrPut(gpa, header.resource.slice(p.it.bytes));
                 if (adj.found_existing) {
                     try p.writeJmp(adj.value_ptr.exit, .{
                         .address = entry_point,
@@ -2435,11 +2461,11 @@ TODO: link tags to their definition
                     adj.value_ptr.entry = entry_point;
                 }
 
-                adj.value_ptr.exit = @intCast(u32, p.obj.program.len);
+                adj.value_ptr.exit = @intCast(u32, p.program.len);
             },
 
             .file => {
-                const file = try p.obj.files.getOrPut(gpa, header.resource.slice(p.it.bytes));
+                const file = try p.files.getOrPut(gpa, header.resource.slice(p.it.bytes));
                 if (file.found_existing) return error.@"Multiple file outputs with the same name";
                 file.value_ptr.* = entry_point;
             },
@@ -2554,12 +2580,9 @@ Pipes pass code blocks through external programs.
     }
 
     pub fn parse(gpa: *Allocator, text: []const u8) !Linker.Object {
-        var p: Parser = .{
-            .it = .{ .bytes = text },
-            .obj = .{ .text = text },
-        };
+        var p: Parser = .{ .it = .{ .bytes = text } };
 
-        errdefer p.obj.deinit(gpa);
+        errdefer p.deinit(gpa);
 
         var code_block = false;
         while (p.next()) |token| {
@@ -2580,7 +2603,13 @@ Pipes pass code blocks through external programs.
             }
         }
 
-        return p.obj;
+        return Linker.Object{
+            .text = text,
+            .program = p.program,
+            .symbols = p.symbols,
+            .adjacent = p.adjacent,
+            .files = p.files,
+        };
     }
 
     test "parse body" {
@@ -2595,8 +2624,8 @@ Pipes pass code blocks through external programs.
             \\text
         ;
 
-        var p: Parser = .{ .it = .{ .bytes = text }, .obj = .{ .text = text } };
-        defer p.obj.deinit(testing.allocator);
+        var p: Parser = .{ .it = .{ .bytes = text } };
+        defer p.deinit(testing.allocator);
         try p.parseBody(testing.allocator, .{
             .language = "",
             .delimiter = "<<>>",
@@ -2614,8 +2643,8 @@ Pipes pass code blocks through external programs.
             \\end
         ;
 
-        var p: Parser = .{ .it = .{ .bytes = text }, .obj = .{ .text = text } };
-        defer p.obj.deinit(testing.allocator);
+        var p: Parser = .{ .it = .{ .bytes = text } };
+        defer p.deinit(testing.allocator);
         try p.parseBody(testing.allocator, .{
             .language = "",
             .delimiter = "<<>>",
@@ -2623,9 +2652,9 @@ Pipes pass code blocks through external programs.
             .type = .tag,
         });
 
-        try testing.expect(p.obj.symbols.contains("a b c"));
-        try testing.expect(p.obj.symbols.contains("1 2 3"));
-        try testing.expect(p.obj.symbols.contains(". . ."));
+        try testing.expect(p.symbols.contains("a b c"));
+        try testing.expect(p.symbols.contains("1 2 3"));
+        try testing.expect(p.symbols.contains(". . ."));
     }
 
     const TestCompileResult = struct {
