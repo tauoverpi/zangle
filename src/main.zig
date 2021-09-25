@@ -280,16 +280,17 @@ const FileContext = struct {
         return .{ .stream = .{ .unbuffered_writer = writer } };
     }
 
-    pub fn write(self: *FileContext, text: []const u8, index: u32, nl: u16) !void {
+    pub fn write(self: *FileContext, vm: *Interpreter, text: []const u8, index: u32, nl: u16) !void {
+        _ = vm;
         _ = index;
         const writer = self.stream.writer();
         try writer.writeAll(text);
         try writer.writeByteNTimes('\n', nl);
     }
 
-    pub fn indent(self: *FileContext, len: u16) !void {
+    pub fn indent(self: *FileContext, vm: *Interpreter) !void {
         const writer = self.stream.writer();
-        try writer.writeByteNTimes(' ', len);
+        try writer.writeByteNTimes(' ', vm.indent);
     }
 };
 
@@ -317,7 +318,7 @@ pub fn run() !void {
     log.info("processing command {s}", .{@tagName(options.command)});
 
     switch (options.command) {
-        .help => unreachable,
+        .help => unreachable, // handled in parseCli
 
         .ls => {
             var buffered = io.bufferedWriter(stdout);

@@ -1,3 +1,5 @@
+![](assets/svg/logo.svg)
+
 # Zangle
 
 Zangle is a literate programming tool for extracting code fragments from
@@ -137,7 +139,7 @@ $ zangle graph README.md | dot -Tpng -o grpah.png
         log.info("processing command {s}", .{@tagName(options.command)});
 
         switch (options.command) {
-            .help => unreachable,
+            .help => unreachable, // handled in parseCli
 
             .ls => {
                 var buffered = io.bufferedWriter(stdout);
@@ -576,9 +578,7 @@ entry-point of the procedure.
             vm.indent -= location.value.indent;
 
             if (@hasDecl(Child(T), "ret")) try eval.ret(
-                vm.ip,
-                vm.module,
-                vm.indent,
+                vm,
                 name,
             );
             log.debug("[mod {d} ip {x:0>8}] ret(mod {d}, ip {x:0>8}, indent {d}, identifier '{s}')", .{
@@ -593,7 +593,7 @@ entry-point of the procedure.
             return true;
         }
 
-        if (@hasDecl(Child(T), "terminate")) try eval.terminate(name);
+        if (@hasDecl(Child(T), "terminate")) try eval.terminate(vm, name);
         log.debug("[mod {d} ip {x:0>8}] terminate(identifier '{s}')", .{
             vm.module,
             vm.ip,
@@ -655,8 +655,8 @@ local to the current module.
 
         vm.ip = data.address;
 
-        if (@hasDecl(Child(T), "jmp")) try eval.jmp(vm.ip, data.address);
-        if (@hasDecl(Child(T), "write")) try eval.write("\n", 0, 0);
+        if (@hasDecl(Child(T), "jmp")) try eval.jmp(vm, data.address);
+        if (@hasDecl(Child(T), "write")) try eval.write(vm, "\n", 0, 0);
 
         log.debug("[mod {d} ip {x:0>8}] jmp(mod {d}, address {x:0>8})", .{
             mod,
@@ -735,7 +735,7 @@ current module.
             vm.module = data.module;
         }
 
-        if (@hasDecl(Child(T), "call")) try eval.call(vm.ip, vm.module, vm.indent);
+        if (@hasDecl(Child(T), "call")) try eval.call(vm);
         log.debug("[mod {d} ip {x:0>8}] call(mod {d}, ip {x:0>8})", .{
             mod,
             ip - 1,
@@ -789,7 +789,7 @@ for filtering rendered content within the given block.
         text: []const u8,
         eval: T,
     ) void {
-        if (@hasDecl(Child(T), "shell")) try eval.shell();
+        if (@hasDecl(Child(T), "shell")) try eval.shell(vm);
         _ = vm;
         _ = data;
         _ = text;
@@ -846,7 +846,7 @@ A trail of newline characters is emitted after the text as specified in the
         eval: T,
     ) !void {
         if (vm.should_indent and vm.last_is_newline) {
-            if (@hasDecl(Child(T), "indent")) try eval.indent(vm.indent);
+            if (@hasDecl(Child(T), "indent")) try eval.indent(vm);
             log.debug("[mod {d} ip {x:0>8}] indent(len {d})", .{
                 vm.module,
                 vm.ip,
@@ -857,6 +857,7 @@ A trail of newline characters is emitted after the text as specified in the
         }
 
         if (@hasDecl(Child(T), "write")) try eval.write(
+            vm,
             text[data.start .. data.start + data.len],
             data.start,
             data.nl,
@@ -889,14 +890,16 @@ Rendering is handled by passing a context in which to run the program.
 
         pub const Stream = std.io.FixedBufferStream([]u8);
 
-        pub fn write(self: *Test, text: []const u8, index: u32, nl: u16) !void {
+        pub fn write(self: *Test, vm: *Interpreter, text: []const u8, index: u32, nl: u16) !void {
             _ = index;
+            _ = vm;
             const writer = self.stream.writer();
             try writer.writeAll(text);
             try writer.writeByteNTimes('\n', nl);
         }
 
-        pub fn indent(self: *Test, len: u16) !void {
+        pub fn indent(self: *Test, vm: *Interpreter, len: u16) !void {
+            _ = vm;
             const writer = self.stream.writer();
             try writer.writeByteNTimes(' ', len);
         }
@@ -920,16 +923,17 @@ Rendering is handled by passing a context in which to run the program.
             return .{ .stream = .{ .unbuffered_writer = writer } };
         }
 
-        pub fn write(self: *FileContext, text: []const u8, index: u32, nl: u16) !void {
+        pub fn write(self: *FileContext, vm: *Interpreter, text: []const u8, index: u32, nl: u16) !void {
+            _ = vm;
             _ = index;
             const writer = self.stream.writer();
             try writer.writeAll(text);
             try writer.writeByteNTimes('\n', nl);
         }
 
-        pub fn indent(self: *FileContext, len: u16) !void {
+        pub fn indent(self: *FileContext, vm: *Interpreter) !void {
             const writer = self.stream.writer();
-            try writer.writeByteNTimes(' ', len);
+            try writer.writeByteNTimes(' ', vm.indent);
         }
     };
 
@@ -939,6 +943,7 @@ Rendering is handled by passing a context in which to run the program.
     ----------------------------------------------
 
     const std = @import("std");
+    const lib = @import("lib");
     const io = std.io;
     const fs = std.fs;
     const assert = std.debug.assert;
@@ -946,6 +951,7 @@ Rendering is handled by passing a context in which to run the program.
     const Allocator = std.mem.Allocator;
     const ArrayList = std.ArrayListUnmanaged;
     const HashMap = std.AutoHashMapUnmanaged;
+    const Interpreter = lib.Interpreter;
     const GraphContext = @This();
 
     stream: Stream,
@@ -1010,17 +1016,13 @@ Rendering is handled by passing a context in which to run the program.
         try self.stream.writer().writeAll("}\n");
     }
 
-    pub fn call(self: *GraphContext, ip: u32, module: u16, indent: u16) !void {
-        _ = ip;
-        _ = module;
-        _ = indent;
+    pub fn call(self: *GraphContext, vm: *Interpreter) !void {
+        _ = vm;
         try self.stack.append(self.gpa, .{});
     }
 
-    pub fn ret(self: *GraphContext, ip: u32, module: u16, indent: u16, name: []const u8) !void {
-        _ = ip;
-        _ = module;
-        _ = indent;
+    pub fn ret(self: *GraphContext, vm: *Interpreter, name: []const u8) !void {
+        _ = vm;
 
         try self.render(name);
 
@@ -1030,7 +1032,8 @@ Rendering is handled by passing a context in which to run the program.
         try self.stack.items[self.stack.items.len - 1].list.append(self.gpa, name);
     }
 
-    pub fn terminate(self: *GraphContext, name: []const u8) !void {
+    pub fn terminate(self: *GraphContext, vm: *Interpreter, name: []const u8) !void {
+        _ = vm;
         try self.render(name);
 
         self.stack.items[0].list.clearRetainingCapacity();
@@ -2901,16 +2904,17 @@ Pipes pass code blocks through external programs.
     }
 
     const Render = struct {
-        pub fn write(_: Render, text: []const u8, index: u32, nl: u16) !void {
+        pub fn write(_: Render, v: *Interpreter, text: []const u8, index: u32, nl: u16) !void {
             _ = index;
+            _ = v;
             const writer = output.writer();
             try writer.writeAll(text);
             try writer.writeByteNTimes('\n', nl);
         }
 
-        pub fn indent(_: Render, len: u16) !void {
+        pub fn indent(_: Render, v: *Interpreter) !void {
             const writer = output.writer();
-            try writer.writeByteNTimes(' ', len);
+            try writer.writeByteNTimes(' ', v.indent);
         }
     };
 

@@ -57,15 +57,16 @@ pub export fn reset() void {
 }
 
 const Render = struct {
-    pub fn write(_: Render, text: []const u8, index: u32, nl: u16) !void {
+    pub fn write(_: Render, v: *Interpreter, text: []const u8, index: u32, nl: u16) !void {
         _ = index;
+        _ = v;
         const writer = output.writer();
         try writer.writeAll(text);
         try writer.writeByteNTimes('\n', nl);
     }
 
-    pub fn indent(_: Render, len: u16) !void {
+    pub fn indent(_: Render, v: *Interpreter) !void {
         const writer = output.writer();
-        try writer.writeByteNTimes(' ', len);
+        try writer.writeByteNTimes(' ', v.indent);
     }
 };

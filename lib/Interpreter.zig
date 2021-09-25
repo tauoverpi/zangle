@@ -60,9 +60,7 @@ fn execRet(vm: *Interpreter, comptime T: type, data: Instruction.Data.Ret, eval:
         vm.indent -= location.value.indent;
 
         if (@hasDecl(Child(T), "ret")) try eval.ret(
-            vm.ip,
-            vm.module,
-            vm.indent,
+            vm,
             name,
         );
         log.debug("[mod {d} ip {x:0>8}] ret(mod {d}, ip {x:0>8}, indent {d}, identifier '{s}')", .{
@@ -77,7 +75,7 @@ fn execRet(vm: *Interpreter, comptime T: type, data: Instruction.Data.Ret, eval:
         return true;
     }
 
-    if (@hasDecl(Child(T), "terminate")) try eval.terminate(name);
+    if (@hasDecl(Child(T), "terminate")) try eval.terminate(vm, name);
     log.debug("[mod {d} ip {x:0>8}] terminate(identifier '{s}')", .{
         vm.module,
         vm.ip,
@@ -96,8 +94,8 @@ fn execJmp(vm: *Interpreter, comptime T: type, data: Instruction.Data.Jmp, eval:
 
     vm.ip = data.address;
 
-    if (@hasDecl(Child(T), "jmp")) try eval.jmp(vm.ip, data.address);
-    if (@hasDecl(Child(T), "write")) try eval.write("\n", 0, 0);
+    if (@hasDecl(Child(T), "jmp")) try eval.jmp(vm, data.address);
+    if (@hasDecl(Child(T), "write")) try eval.write(vm, "\n", 0, 0);
 
     log.debug("[mod {d} ip {x:0>8}] jmp(mod {d}, address {x:0>8})", .{
         mod,
@@ -129,7 +127,7 @@ fn execCall(vm: *Interpreter, comptime T: type, data: Instruction.Data.Call, gpa
         vm.module = data.module;
     }
 
-    if (@hasDecl(Child(T), "call")) try eval.call(vm.ip, vm.module, vm.indent);
+    if (@hasDecl(Child(T), "call")) try eval.call(vm);
     log.debug("[mod {d} ip {x:0>8}] call(mod {d}, ip {x:0>8})", .{
         mod,
         ip - 1,
@@ -144,7 +142,7 @@ fn execShell(
     text: []const u8,
     eval: T,
 ) void {
-    if (@hasDecl(Child(T), "shell")) try eval.shell();
+    if (@hasDecl(Child(T), "shell")) try eval.shell(vm);
     _ = vm;
     _ = data;
     _ = text;
@@ -158,7 +156,7 @@ fn execWrite(
     eval: T,
 ) !void {
     if (vm.should_indent and vm.last_is_newline) {
-        if (@hasDecl(Child(T), "indent")) try eval.indent(vm.indent);
+        if (@hasDecl(Child(T), "indent")) try eval.indent(vm);
         log.debug("[mod {d} ip {x:0>8}] indent(len {d})", .{
             vm.module,
             vm.ip,
@@ -169,6 +167,7 @@ fn execWrite(
     }
 
     if (@hasDecl(Child(T), "write")) try eval.write(
+        vm,
         text[data.start .. data.start + data.len],
         data.start,
         data.nl,
@@ -191,14 +190,16 @@ const Test = struct {
 
     pub const Stream = std.io.FixedBufferStream([]u8);
 
-    pub fn write(self: *Test, text: []const u8, index: u32, nl: u16) !void {
+    pub fn write(self: *Test, vm: *Interpreter, text: []const u8, index: u32, nl: u16) !void {
         _ = index;
+        _ = vm;
         const writer = self.stream.writer();
         try writer.writeAll(text);
         try writer.writeByteNTimes('\n', nl);
     }
 
-    pub fn indent(self: *Test, len: u16) !void {
+    pub fn indent(self: *Test, vm: *Interpreter, len: u16) !void {
+        _ = vm;
         const writer = self.stream.writer();
         try writer.writeByteNTimes(' ', len);
     }
