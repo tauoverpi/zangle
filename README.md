@@ -2629,24 +2629,7 @@ Pipes pass code blocks through external programs.
 
         errdefer p.deinit(gpa);
 
-        var code_block = false;
-        while (p.next()) |token| {
-            if (token.tag == .nl and token.len() >= 2) {
-                if (p.eat(.space, @src())) |space| if (space.len == 4 and !code_block) {
-                    const header = p.parseHeaderLine() catch |e| switch (e) {
-                        error.@"Missing language specification" => {
-                            code_block = true;
-                            continue;
-                        },
-                        else => |err| return err,
-                    };
-
-                    try p.parseBody(gpa, header);
-                } else if (space.len < 4) {
-                    code_block = false;
-                };
-            }
-        }
+        while (try p.step(gpa)) {}
 
         return Linker.Object{
             .text = text,
@@ -2655,6 +2638,32 @@ Pipes pass code blocks through external programs.
             .adjacent = p.adjacent,
             .files = p.files,
         };
+    }
+
+    pub fn step(p: *Parser, gpa: *Allocator) !bool {
+        while (p.next()) |token| if (token.tag == .nl and token.len() >= 2) {
+            const space = p.eat(.space, @src()) orelse continue;
+            if (space.len != 4) continue;
+
+            if (p.parseHeaderLine()) |header| {
+                try p.parseBody(gpa, header);
+            } else |e| switch (e) {
+                error.@"Missing language specification" => {
+                    log.debug("begin indented block", .{});
+                    defer log.debug("end indented block", .{});
+
+                    while (p.scan(.nl)) |nl| if (nl.len() >= 2) {
+                        const tmp = p.next() orelse return false;
+                        if (tmp.tag != .space) return true;
+                        if (tmp.len() < 4) return true;
+                    };
+                },
+
+                else => |err| return err,
+            }
+        };
+
+        return false;
     }
 
     const TestCompileResult = struct {
@@ -2748,6 +2757,27 @@ Pipes pass code blocks through external programs.
     test "compile block inline" {
         try testCompile(
             \\begin
+            \\
+            \\    lang: zig esc: <<>> tag: #here
+            \\    ------------------------------
+            \\
+            \\    <<one>><<two>>
+            \\
+            \\end
+        , .{
+            .program = &.{ .call, .call, .ret },
+            .symbols = &.{ "one", "two" },
+            .exports = &.{"here"},
+        });
+    }
+
+    test "compile indented" {
+        try testCompile(
+            \\begin
+            \\
+            \\    normal code block
+            \\
+            \\end
             \\
             \\    lang: zig esc: <<>> tag: #here
             \\    ------------------------------
