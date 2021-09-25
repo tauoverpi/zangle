@@ -1,11 +1,17 @@
 const std = @import("std");
 const mem = std.mem;
 const testing = std.testing;
+const assert = std.debug.assert;
 
 const Tokenizer = @This();
 
 bytes: []const u8,
 index: usize = 0,
+
+pub const Location = struct {
+    line: usize = 1,
+    column: usize = 1,
+};
 
 const log = std.log.scoped(.tokenizer);
 
@@ -47,6 +53,25 @@ pub const Token = struct {
         return t.end - t.start;
     }
 };
+
+pub fn locationFrom(self: Tokenizer, from: Location) Location {
+    assert(from.line != 0);
+    assert(from.column != 0);
+
+    var loc = from;
+    const start = from.line * from.column - 1;
+
+    for (self.bytes[start..self.index]) |byte| {
+        if (byte == '\n') {
+            loc.line += 1;
+            loc.column = 1;
+        } else {
+            loc.column += 1;
+        }
+    }
+
+    return loc;
+}
 
 pub fn next(self: *Tokenizer) Token {
     var token: Token = .{

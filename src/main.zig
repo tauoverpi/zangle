@@ -234,7 +234,23 @@ fn parseCli(gpa: *Allocator, objects: *Linker.Object.List) !?Options {
         } else {
             std.log.info("compiling {s}", .{arg});
             const text = try fs.cwd().readFileAlloc(gpa, arg, 0x7fff_ffff);
-            const object = try Parser.parse(gpa, text);
+
+            var p: Parser = .{ .it = .{ .bytes = text } };
+
+            while (p.step(gpa)) |working| {
+                if (!working) break;
+            } else |err| {
+                const location = p.it.locationFrom(.{});
+                log.err("line {d} col {d}: {s}", .{
+                    location.line,
+                    location.column,
+                    @errorName(err),
+                });
+
+                os.exit(1);
+            }
+
+            const object = p.object();
 
             objects.append(gpa, object) catch return error.@"Exhausted memory";
         }

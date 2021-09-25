@@ -420,7 +420,23 @@ TODO: js example using zangle
             } else {
                 std.log.info("compiling {s}", .{arg});
                 const text = try fs.cwd().readFileAlloc(gpa, arg, 0x7fff_ffff);
-                const object = try Parser.parse(gpa, text);
+
+                var p: Parser = .{ .it = .{ .bytes = text } };
+
+                while (p.step(gpa)) |working| {
+                    if (!working) break;
+                } else |err| {
+                    const location = p.it.locationFrom(.{});
+                    log.err("line {d} col {d}: {s}", .{
+                        location.line,
+                        location.column,
+                        @errorName(err),
+                    });
+
+                    os.exit(1);
+                }
+
+                const object = p.object();
 
                 objects.append(gpa, object) catch return error.@"Exhausted memory";
             }
@@ -1827,15 +1843,40 @@ The default syntax consists of blocks indented by 4 spaces.
     const std = @import("std");
     const mem = std.mem;
     const testing = std.testing;
+    const assert = std.debug.assert;
 
     const Tokenizer = @This();
 
     bytes: []const u8,
     index: usize = 0,
 
+    pub const Location = struct {
+        line: usize = 1,
+        column: usize = 1,
+    };
+
     const log = std.log.scoped(.tokenizer);
 
     [[zangle tokenizer token]]
+
+    pub fn locationFrom(self: Tokenizer, from: Location) Location {
+        assert(from.line != 0);
+        assert(from.column != 0);
+
+        var loc = from;
+        const start = from.line * from.column - 1;
+
+        for (self.bytes[start..self.index]) |byte| {
+            if (byte == '\n') {
+                loc.line += 1;
+                loc.column = 1;
+            } else {
+                loc.column += 1;
+            }
+        }
+
+        return loc;
+    }
 
     pub fn next(self: *Tokenizer) Token {
         var token: Token = .{
@@ -2626,13 +2667,22 @@ Pipes pass code blocks through external programs.
 
     pub fn parse(gpa: *Allocator, text: []const u8) !Linker.Object {
         var p: Parser = .{ .it = .{ .bytes = text } };
-
         errdefer p.deinit(gpa);
 
         while (try p.step(gpa)) {}
 
         return Linker.Object{
             .text = text,
+            .program = p.program,
+            .symbols = p.symbols,
+            .adjacent = p.adjacent,
+            .files = p.files,
+        };
+    }
+
+    pub fn object(p: *Parser) Linker.Object {
+        return Linker.Object{
+            .text = p.it.bytes,
             .program = p.program,
             .symbols = p.symbols,
             .adjacent = p.adjacent,

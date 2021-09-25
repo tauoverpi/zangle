@@ -744,13 +744,22 @@ test "compile single tag" {
 
 pub fn parse(gpa: *Allocator, text: []const u8) !Linker.Object {
     var p: Parser = .{ .it = .{ .bytes = text } };
-
     errdefer p.deinit(gpa);
 
     while (try p.step(gpa)) {}
 
     return Linker.Object{
         .text = text,
+        .program = p.program,
+        .symbols = p.symbols,
+        .adjacent = p.adjacent,
+        .files = p.files,
+    };
+}
+
+pub fn object(p: *Parser) Linker.Object {
+    return Linker.Object{
+        .text = p.it.bytes,
         .program = p.program,
         .symbols = p.symbols,
         .adjacent = p.adjacent,
