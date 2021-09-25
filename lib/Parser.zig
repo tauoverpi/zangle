@@ -348,179 +348,6 @@ fn parseHeaderLine(p: *Parser) ParseHeaderError!Header {
 
     return header;
 }
-
-test "parse header line" {
-    const complete_header = "lang: zig esc: {{}} tag: #hash\n    ------------------------------\n\n";
-    const common: Header = .{
-        .language = "zig",
-        .delimiter = "{{}}",
-        .resource = .{
-            .start = @intCast(u32, mem.indexOf(u8, complete_header, "hash").?),
-            .len = 4,
-        },
-        .type = .tag,
-    };
-
-    try testing.expectError(
-        error.@"Expected a space between 'lang:' and the language name",
-        testParseHeader("lang:zig", common),
-    );
-
-    try testing.expectError(
-        error.@"Missing 'esc:' delimiter specification",
-        testParseHeader("lang: zig ", common),
-    );
-
-    try testing.expectError(
-        error.@"Missing ':' after 'esc'",
-        testParseHeader("lang: zig esc", common),
-    );
-
-    try testing.expectError(
-        error.@"Expected a space between 'esc:' and the delimiter specification",
-        testParseHeader("lang: zig esc:", common),
-    );
-
-    try testing.expectError(
-        error.@"Expected closing delimiter",
-        testParseHeader("lang: zig esc: {", common),
-    );
-
-    try testing.expectError(
-        error.@"Expected matching closing angle bracket '>'",
-        testParseHeader("lang: zig esc: <}", common),
-    );
-
-    try testing.expectError(
-        error.@"Expected matching closing brace '}'",
-        testParseHeader("lang: zig esc: {>", common),
-    );
-
-    try testing.expectError(
-        error.@"Expected matching closing bracket ']'",
-        testParseHeader("lang: zig esc: [>", common),
-    );
-
-    try testing.expectError(
-        error.@"Expected matching closing paren ')'",
-        testParseHeader("lang: zig esc: (>", common),
-    );
-
-    try testing.expectError(
-        error.@"Invalid delimiter, expected one of '<', '{', '[', '('",
-        testParseHeader("lang: zig esc: foo", common),
-    );
-
-    try testing.expectError(
-        error.@"Invalid delimiter, expected one of '>', '}', ']', ')'",
-        testParseHeader("lang: zig esc: <oo", common),
-    );
-
-    try testing.expectError(
-        error.@"Expected opening and closing delimiter lengths to match",
-        testParseHeader("lang: zig esc: {}}", common),
-    );
-
-    try testing.expectError(
-        error.@"Expected a space after delimiter specification",
-        testParseHeader("lang: zig esc: {{}}", common),
-    );
-
-    try testing.expectError(
-        error.@"Expected 'tag:' or 'file:' following delimiter specification",
-        testParseHeader("lang: zig esc: {{}} ", common),
-    );
-
-    try testing.expectError(
-        error.@"Invalid option given, expected 'tag:' or 'file:'",
-        testParseHeader("lang: zig esc: {{}} none", common),
-    );
-
-    try testing.expectError(
-        error.@"Missing ':' after 'file'",
-        testParseHeader("lang: zig esc: {{}} file", common),
-    );
-
-    try testing.expectError(
-        error.@"Expected a space after 'file:'",
-        testParseHeader("lang: zig esc: {{}} file:", common),
-    );
-
-    try testing.expectError(
-        error.@"Missing file name",
-        testParseHeader("lang: zig esc: {{}} file: \n", common),
-    );
-
-    try testing.expectError(
-        error.@"Missing ':' after 'tag'",
-        testParseHeader("lang: zig esc: {{}} tag", common),
-    );
-
-    try testing.expectError(
-        error.@"Expected a space after 'tag:'",
-        testParseHeader("lang: zig esc: {{}} tag:", common),
-    );
-
-    try testing.expectError(
-        error.@"Missing '#' after 'tag: '",
-        testParseHeader("lang: zig esc: {{}} tag: ", common),
-    );
-
-    try testing.expectError(
-        error.@"Expected a newline after the header",
-        testParseHeader("lang: zig esc: {{}} tag: #", common),
-    );
-
-    try testing.expectError(
-        error.@"Missing tag name",
-        testParseHeader("lang: zig esc: {{}} tag: #\n", common),
-    );
-
-    try testing.expectError(
-        error.@"Expected the dividing line to be indented by 4 spaces",
-        testParseHeader("lang: zig esc: {{}} tag: #hash\n", common),
-    );
-
-    try testing.expectError(
-        error.@"Expected a dividing line of '-' of the same length as the header",
-        testParseHeader("lang: zig esc: {{}} tag: #hash\n    ", common),
-    );
-
-    try testing.expectError(
-        error.@"Expected the division line to be of the same length as the header",
-        testParseHeader("lang: zig esc: {{}} tag: #hash\n    ----------------", common),
-    );
-
-    try testing.expectError(
-        error.@"Expected at least one blank line after the division line",
-        testParseHeader("lang: zig esc: {{}} tag: #hash\n    ------------------------------", common),
-    );
-
-    try testing.expectError(
-        error.@"Expected at least one blank line after the division line",
-        testParseHeader("lang: zig esc: {{}} tag: #hash\n    ------------------------------\n", common),
-    );
-
-    try testParseHeader(complete_header, common);
-}
-
-fn testParseHeader(text: []const u8, expected: Header) !void {
-    var p: Parser = .{ .it = .{ .bytes = text } };
-    const header = try p.parseHeaderLine();
-
-    testing.expectEqualStrings(expected.language, header.language) catch return error.@"Language is not the same";
-
-    if (expected.delimiter != null and header.delimiter != null) {
-        testing.expectEqualStrings(expected.language, header.language) catch return error.@"Delimiter is not the same";
-    } else if (expected.delimiter == null and header.delimiter != null) {
-        return error.@"Expected delimiter to be null";
-    } else if (expected.delimiter != null and header.delimiter == null) {
-        return error.@"Expected delimiter to not be null";
-    }
-
-    testing.expectEqual(expected.resource, header.resource) catch return error.@"Resource is not the same";
-    testing.expectEqual(expected.type, header.type) catch return error.@"Type is not the same";
-}
 fn parseBody(p: *Parser, gpa: *Allocator, header: Header) !void {
     log.debug("begin parsing body", .{});
     defer log.debug("end parsing body", .{});
@@ -791,6 +618,178 @@ pub fn step(p: *Parser, gpa: *Allocator) !bool {
     };
 
     return false;
+}
+test "parse header line" {
+    const complete_header = "lang: zig esc: {{}} tag: #hash\n    ------------------------------\n\n";
+    const common: Header = .{
+        .language = "zig",
+        .delimiter = "{{}}",
+        .resource = .{
+            .start = @intCast(u32, mem.indexOf(u8, complete_header, "hash").?),
+            .len = 4,
+        },
+        .type = .tag,
+    };
+
+    try testing.expectError(
+        error.@"Expected a space between 'lang:' and the language name",
+        testParseHeader("lang:zig", common),
+    );
+
+    try testing.expectError(
+        error.@"Missing 'esc:' delimiter specification",
+        testParseHeader("lang: zig ", common),
+    );
+
+    try testing.expectError(
+        error.@"Missing ':' after 'esc'",
+        testParseHeader("lang: zig esc", common),
+    );
+
+    try testing.expectError(
+        error.@"Expected a space between 'esc:' and the delimiter specification",
+        testParseHeader("lang: zig esc:", common),
+    );
+
+    try testing.expectError(
+        error.@"Expected closing delimiter",
+        testParseHeader("lang: zig esc: {", common),
+    );
+
+    try testing.expectError(
+        error.@"Expected matching closing angle bracket '>'",
+        testParseHeader("lang: zig esc: <}", common),
+    );
+
+    try testing.expectError(
+        error.@"Expected matching closing brace '}'",
+        testParseHeader("lang: zig esc: {>", common),
+    );
+
+    try testing.expectError(
+        error.@"Expected matching closing bracket ']'",
+        testParseHeader("lang: zig esc: [>", common),
+    );
+
+    try testing.expectError(
+        error.@"Expected matching closing paren ')'",
+        testParseHeader("lang: zig esc: (>", common),
+    );
+
+    try testing.expectError(
+        error.@"Invalid delimiter, expected one of '<', '{', '[', '('",
+        testParseHeader("lang: zig esc: foo", common),
+    );
+
+    try testing.expectError(
+        error.@"Invalid delimiter, expected one of '>', '}', ']', ')'",
+        testParseHeader("lang: zig esc: <oo", common),
+    );
+
+    try testing.expectError(
+        error.@"Expected opening and closing delimiter lengths to match",
+        testParseHeader("lang: zig esc: {}}", common),
+    );
+
+    try testing.expectError(
+        error.@"Expected a space after delimiter specification",
+        testParseHeader("lang: zig esc: {{}}", common),
+    );
+
+    try testing.expectError(
+        error.@"Expected 'tag:' or 'file:' following delimiter specification",
+        testParseHeader("lang: zig esc: {{}} ", common),
+    );
+
+    try testing.expectError(
+        error.@"Invalid option given, expected 'tag:' or 'file:'",
+        testParseHeader("lang: zig esc: {{}} none", common),
+    );
+
+    try testing.expectError(
+        error.@"Missing ':' after 'file'",
+        testParseHeader("lang: zig esc: {{}} file", common),
+    );
+
+    try testing.expectError(
+        error.@"Expected a space after 'file:'",
+        testParseHeader("lang: zig esc: {{}} file:", common),
+    );
+
+    try testing.expectError(
+        error.@"Missing file name",
+        testParseHeader("lang: zig esc: {{}} file: \n", common),
+    );
+
+    try testing.expectError(
+        error.@"Missing ':' after 'tag'",
+        testParseHeader("lang: zig esc: {{}} tag", common),
+    );
+
+    try testing.expectError(
+        error.@"Expected a space after 'tag:'",
+        testParseHeader("lang: zig esc: {{}} tag:", common),
+    );
+
+    try testing.expectError(
+        error.@"Missing '#' after 'tag: '",
+        testParseHeader("lang: zig esc: {{}} tag: ", common),
+    );
+
+    try testing.expectError(
+        error.@"Expected a newline after the header",
+        testParseHeader("lang: zig esc: {{}} tag: #", common),
+    );
+
+    try testing.expectError(
+        error.@"Missing tag name",
+        testParseHeader("lang: zig esc: {{}} tag: #\n", common),
+    );
+
+    try testing.expectError(
+        error.@"Expected the dividing line to be indented by 4 spaces",
+        testParseHeader("lang: zig esc: {{}} tag: #hash\n", common),
+    );
+
+    try testing.expectError(
+        error.@"Expected a dividing line of '-' of the same length as the header",
+        testParseHeader("lang: zig esc: {{}} tag: #hash\n    ", common),
+    );
+
+    try testing.expectError(
+        error.@"Expected the division line to be of the same length as the header",
+        testParseHeader("lang: zig esc: {{}} tag: #hash\n    ----------------", common),
+    );
+
+    try testing.expectError(
+        error.@"Expected at least one blank line after the division line",
+        testParseHeader("lang: zig esc: {{}} tag: #hash\n    ------------------------------", common),
+    );
+
+    try testing.expectError(
+        error.@"Expected at least one blank line after the division line",
+        testParseHeader("lang: zig esc: {{}} tag: #hash\n    ------------------------------\n", common),
+    );
+
+    try testParseHeader(complete_header, common);
+}
+
+fn testParseHeader(text: []const u8, expected: Header) !void {
+    var p: Parser = .{ .it = .{ .bytes = text } };
+    const header = try p.parseHeaderLine();
+
+    testing.expectEqualStrings(expected.language, header.language) catch return error.@"Language is not the same";
+
+    if (expected.delimiter != null and header.delimiter != null) {
+        testing.expectEqualStrings(expected.language, header.language) catch return error.@"Delimiter is not the same";
+    } else if (expected.delimiter == null and header.delimiter != null) {
+        return error.@"Expected delimiter to be null";
+    } else if (expected.delimiter != null and header.delimiter == null) {
+        return error.@"Expected delimiter to not be null";
+    }
+
+    testing.expectEqual(expected.resource, header.resource) catch return error.@"Resource is not the same";
+    testing.expectEqual(expected.type, header.type) catch return error.@"Type is not the same";
 }
 
 const TestCompileResult = struct {

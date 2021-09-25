@@ -61,8 +61,26 @@ $ zangle graph README.md | dot -Tpng -o grpah.png
 
     const std = @import("std");
     const lib = @import("lib");
+    const mem = std.mem;
+    const assert = std.debug.assert;
+    const testing = std.testing;
+    const meta = std.meta;
+    const fs = std.fs;
+    const fmt = std.fmt;
+    const io = std.io;
+    const os = std.os;
+    const stdout = io.getStdOut().writer();
 
-    [[main imports]]
+    const Allocator = std.mem.Allocator;
+    const ArrayList = std.ArrayListUnmanaged;
+    const HashMap = std.AutoArrayHashMapUnmanaged;
+    const MultiArrayList = std.MultiArrayList;
+    const Tokenizer = lib.Tokenizer;
+    const Parser = lib.Parser;
+    const Linker = lib.Linker;
+    const Instruction = lib.Instruction;
+    const Interpreter = lib.Interpreter;
+    const GraphContext = @import("GraphContext.zig");
 
     pub const log_level = .info;
 
@@ -198,39 +216,7 @@ $ zangle graph README.md | dot -Tpng -o grpah.png
 
     [[create file with path wrapper]]
 
-## From the web
-
-TODO: js example using zangle
-
 # Command-line interface
-
-## Imports
-
-    lang: zig esc: none tag: #main imports
-    --------------------------------------
-
-    const mem = std.mem;
-    const assert = std.debug.assert;
-    const testing = std.testing;
-    const meta = std.meta;
-    const fs = std.fs;
-    const fmt = std.fmt;
-    const io = std.io;
-    const os = std.os;
-    const stdout = io.getStdOut().writer();
-
-    const Allocator = std.mem.Allocator;
-    const ArrayList = std.ArrayListUnmanaged;
-    const HashMap = std.AutoArrayHashMapUnmanaged;
-    const MultiArrayList = std.MultiArrayList;
-    const Tokenizer = lib.Tokenizer;
-    const Parser = lib.Parser;
-    const Linker = lib.Linker;
-    const Instruction = lib.Instruction;
-    const Interpreter = lib.Interpreter;
-    const GraphContext = @import("GraphContext.zig");
-
-## Parsing
 
     lang: zig esc: none tag: #command-line parser
     ---------------------------------------------
@@ -485,7 +471,442 @@ TODO: js example using zangle
         return try fs.cwd().createFile(path, .{ .truncate = true });
     }
 
-## Rendering context
+# Machine
+
+Zangle represents documents as bytecode programs consisting mostly of `write`
+instructions to render code line-by-line with respect to the tag's indentation
+along with block writes for weaving literate source documents. Other
+instructions handle the order in which to tangle blocks of code such as
+`call` which embeds one block in another and `jmp` which threads adjacent
+blocks (by tag name) together into one.
+
+## Instructions
+
+Each instruction consists of an 8-bit opcode along with a 64-bit data argument.
+
+    lang: zig esc: [[]] file: lib/Instruction.zig
+    ---------------------------------------------
+
+    const std = @import("std");
+    const assert = std.debug.assert;
+
+    const Instruction = @This();
+
+    opcode: Opcode,
+    data: Data,
+
+    pub const List = std.MultiArrayList(Instruction);
+    pub const Opcode = enum(u8) {
+        ret,
+        call,
+        jmp,
+        shell,
+        write,
+    };
+
+    pub const Data = extern union {
+        ret: Ret,
+        jmp: Jmp,
+        call: Call,
+        shell: Shell,
+        write: Write,
+
+        [[instruction list]]
+    };
+
+    comptime {
+        assert(@sizeOf(Data) == 8);
+    }
+
+### Ret
+
+Pops the location and module in which the matching `call` instruction
+originated from. If any filters have been registered in the calling context
+then this instruction marks the end of the context and executes the action
+bound. The payload includes the index and length of the current procedure
+name which is provided as a parameter to rendering contexts.
+
+    lang: zig esc: none tag: #instruction list
+    ------------------------------------------
+
+    pub const Ret = extern struct {
+        start: u32,
+        len: u16,
+        pad: u16 = 0,
+    };
+
+<!-- -->
+
+    lang: zig esc: none tag: #parser codegen
+    ----------------------------------------
+
+    fn emitRet(
+        p: *Parser,
+        gpa: *Allocator,
+        params: Instruction.Data.Ret,
+    ) !void {
+        log.debug("emitting ret", .{});
+        try p.program.append(gpa, .{
+            .opcode = .ret,
+            .data = .{ .ret = params },
+        });
+    }
+
+Execution of the `ret` instruction.
+
+`ret` will invoke the `ret` method of the render context upon returning from
+a normal procedure and `terminate` upon reaching the end of the program. Of
+the parameters, `module` is that of the caller and `ip` points to the next
+instruction to be run which a rendering context can use to calculate the
+entry-point of the procedure.
+
+    lang: zig esc: none tag: #interpreter step
+    ------------------------------------------
+
+    fn execRet(vm: *Interpreter, comptime T: type, data: Instruction.Data.Ret, eval: T) !bool {
+        const name = vm.linker.objects.items[vm.module - 1]
+            .text[data.start .. data.start + data.len];
+
+        if (vm.stack.popOrNull()) |location| {
+            const mod = vm.module;
+            const ip = vm.ip;
+
+            vm.ip = location.value.ip;
+            vm.module = location.value.module;
+            vm.indent -= location.value.indent;
+
+            if (@hasDecl(Child(T), "ret")) try eval.ret(
+                vm.ip,
+                vm.module,
+                vm.indent,
+                name,
+            );
+            log.debug("[mod {d} ip {x:0>8}] ret(mod {d}, ip {x:0>8}, indent {d}, identifier '{s}')", .{
+                mod,
+                ip,
+                vm.module,
+                vm.ip,
+                vm.indent,
+                name,
+            });
+
+            return true;
+        }
+
+        if (@hasDecl(Child(T), "terminate")) try eval.terminate(name);
+        log.debug("[mod {d} ip {x:0>8}] terminate(identifier '{s}')", .{
+            vm.module,
+            vm.ip,
+            name,
+        });
+
+        return false;
+    }
+
+### Jmp
+
+Jumps to the specified address of the given module without pushing to the
+return stack. This instruction is primarily used to thread blocks with the
+same tag together across files in the order in which they occur within the
+literate source. If the target module is 0 then it's interpreted as being
+local to the current module.
+
+    lang: zig esc: none tag: #instruction list
+    ------------------------------------------
+
+    pub const Jmp = extern struct {
+        address: u32,
+        module: u16,
+        generation: u16 = 0,
+    };
+
+<!-- -->
+
+    lang: zig esc: none tag: #parser codegen
+    ----------------------------------------
+
+    fn writeJmp(
+        p: *Parser,
+        location: u32,
+        params: Instruction.Data.Jmp,
+    ) !void {
+        log.debug("writing jmp over {x:0>8} to {x:0>8}", .{
+            location,
+            params.address,
+        });
+        p.program.set(location, .{
+            .opcode = .jmp,
+            .data = .{ .jmp = params },
+        });
+    }
+
+<!-- -->
+
+    lang: zig esc: none tag: #interpreter step
+    ------------------------------------------
+
+    fn execJmp(vm: *Interpreter, comptime T: type, data: Instruction.Data.Jmp, eval: T) !void {
+        const mod = vm.module;
+        const ip = vm.ip;
+
+        if (data.module != 0) {
+            vm.module = data.module;
+        }
+
+        vm.ip = data.address;
+
+        if (@hasDecl(Child(T), "jmp")) try eval.jmp(vm.ip, data.address);
+        if (@hasDecl(Child(T), "write")) try eval.write("\n", 0, 0);
+
+        log.debug("[mod {d} ip {x:0>8}] jmp(mod {d}, address {x:0>8})", .{
+            mod,
+            ip,
+            vm.module,
+            vm.ip,
+        });
+
+        vm.last_is_newline = true;
+    }
+
+### Call
+
+Saves the module context, instruction pointer, and calling context on the
+return stack before jumping to the specified address within the given module.
+If the target module is 0 then it's interpreted as being local to the
+current module.
+
+    lang: zig esc: none tag: #instruction list
+    ------------------------------------------
+
+    pub const Call = extern struct {
+        address: u32,
+        module: u16,
+        indent: u16,
+    };
+
+<!-- -->
+
+    lang: zig esc: none tag: #parser codegen
+    ----------------------------------------
+
+    fn emitCall(
+        p: *Parser,
+        gpa: *Allocator,
+        tag: []const u8,
+        params: Instruction.Data.Call,
+    ) !void {
+        log.debug("emitting call to {s}", .{tag});
+        const result = try p.symbols.getOrPut(gpa, tag);
+        if (!result.found_existing) {
+            result.value_ptr.* = .{};
+        }
+
+        try result.value_ptr.append(gpa, @intCast(u32, p.program.len));
+
+        try p.program.append(gpa, .{
+            .opcode = .call,
+            .data = .{ .call = params },
+        });
+    }
+
+<!-- -->
+
+    lang: zig esc: none tag: #interpreter step
+    ------------------------------------------
+
+    fn execCall(vm: *Interpreter, comptime T: type, data: Instruction.Data.Call, gpa: *Allocator, eval: T) !void {
+        if (vm.stack.contains(vm.ip)) {
+            return error.@"Cyclic reference detected";
+        }
+
+        const mod = vm.module;
+        const ip = vm.ip;
+
+        try vm.stack.put(gpa, vm.ip, .{
+            .ip = vm.ip,
+            .indent = data.indent,
+            .module = vm.module,
+        });
+
+        vm.indent += data.indent;
+        vm.ip = data.address;
+
+        if (data.module != 0) {
+            vm.module = data.module;
+        }
+
+        if (@hasDecl(Child(T), "call")) try eval.call(vm.ip, vm.module, vm.indent);
+        log.debug("[mod {d} ip {x:0>8}] call(mod {d}, ip {x:0>8})", .{
+            mod,
+            ip - 1,
+            vm.module,
+            vm.ip,
+        });
+    }
+
+### Shell
+
+Appends a calling context to the next `call` instruction with a shell command
+for filtering rendered content within the given block.
+
+    lang: zig esc: none tag: #instruction list
+    ------------------------------------------
+
+    pub const Shell = extern struct {
+        command: u32,
+        module: u16,
+        len: u8,
+        pad: u8,
+    };
+
+
+<!-- -->
+
+    lang: zig esc: none tag: #parser codegen
+    ----------------------------------------
+
+    fn emitShell(
+        p: *Parser,
+        gpa: *Allocator,
+        params: Instruction.Data.Shell,
+    ) !void {
+        log.debug("emitting shell command", .{});
+        try p.program.append(gpa, .{
+            .opcode = .shell,
+            .data = .{ .shell = params },
+        });
+    }
+
+<!-- -->
+
+    lang: zig esc: none tag: #interpreter step
+    ------------------------------------------
+
+    fn execShell(
+        vm: *Interpreter,
+        comptime T: type,
+        data: Instruction.Data.Shell,
+        text: []const u8,
+        eval: T,
+    ) void {
+        if (@hasDecl(Child(T), "shell")) try eval.shell();
+        _ = vm;
+        _ = data;
+        _ = text;
+        @panic("TODO: implement shell");
+    }
+
+### Write
+
+Writes lines of text from the current module to the output stream. If a
+calling context is present then the output is written to a buffer instead.
+A trail of newline characters is emitted after the text as specified in the
+`nl` field of the 64-bit data block.
+
+    lang: zig esc: none tag: #instruction list
+    ------------------------------------------
+
+    pub const Write = extern struct {
+        start: u32,
+        len: u16,
+        nl: u16,
+    };
+
+<!-- -->
+
+    lang: zig esc: none tag: #parser codegen
+    ----------------------------------------
+
+    fn emitWrite(
+        p: *Parser,
+        gpa: *Allocator,
+        params: Instruction.Data.Write,
+    ) !void {
+        log.debug("emitting write {x:0>8} len {d} nl {d}", .{
+            params.start,
+            params.len,
+            params.nl,
+        });
+        try p.program.append(gpa, .{
+            .opcode = .write,
+            .data = .{ .write = params },
+        });
+    }
+
+<!-- -->
+
+    lang: zig esc: none tag: #interpreter step
+    ------------------------------------------
+
+    fn execWrite(
+        vm: *Interpreter,
+        comptime T: type,
+        data: Instruction.Data.Write,
+        text: []const u8,
+        eval: T,
+    ) !void {
+        if (vm.should_indent and vm.last_is_newline) {
+            if (@hasDecl(Child(T), "indent")) try eval.indent(vm.indent);
+            log.debug("[mod {d} ip {x:0>8}] indent(len {d})", .{
+                vm.module,
+                vm.ip,
+                vm.indent,
+            });
+        } else {
+            vm.should_indent = true;
+        }
+
+        if (@hasDecl(Child(T), "write")) try eval.write(
+            text[data.start .. data.start + data.len],
+            data.start,
+            data.nl,
+        );
+
+        log.debug("[mod {d} ip {x:0>8}] write(text {*}, index {x:0>8}, len {d}, nl {d}): {s}", .{
+            vm.module,
+            vm.ip,
+            text,
+            data.start,
+            data.len,
+            data.nl,
+            text[data.start .. data.start + data.len],
+        });
+
+        vm.last_is_newline = data.nl != 0;
+    }
+
+## Interpreter contexts
+
+Rendering is handled by passing a context in which to run the program.
+
+### Test context
+
+    lang: zig esc: none tag: #interpreter step
+    ------------------------------------------
+
+    const Test = struct {
+        stream: Stream,
+
+        pub const Stream = std.io.FixedBufferStream([]u8);
+
+        pub fn write(self: *Test, text: []const u8, index: u32, nl: u16) !void {
+            _ = index;
+            const writer = self.stream.writer();
+            try writer.writeAll(text);
+            try writer.writeByteNTimes('\n', nl);
+        }
+
+        pub fn indent(self: *Test, len: u16) !void {
+            const writer = self.stream.writer();
+            try writer.writeByteNTimes(' ', len);
+        }
+
+        pub fn expect(self: *Test, expected: []const u8) !void {
+            try testing.expectEqualStrings(expected, self.stream.getWritten());
+        }
+    };
+
+### File context
 
     lang: zig esc: none tag: #file rendering context
     ------------------------------------------------
@@ -512,7 +933,7 @@ TODO: js example using zangle
         }
     };
 
-<!-- -->
+### Graph context
 
     lang: zig esc: none file: src/GraphContext.zig
     ----------------------------------------------
@@ -664,580 +1085,7 @@ TODO: js example using zangle
         }
     }
 
-# WebAssembly interface
-
-    lang: zig esc: none file: lib/wasm.zig
-    --------------------------------------
-
-    const std = @import("std");
-    const lib = @import("lib.zig");
-
-    const Interpreter = lib.Interpreter;
-    const Parser = lib.Parser;
-    const ArrayList = std.ArrayList;
-
-    var vm: Interpreter = .{};
-    var instance = std.heap.GeneralPurposeAllocator(.{}){};
-    var output: ArrayList(u8) = undefined;
-    const gpa = &instance.allocator;
-
-    pub export fn init() void {
-        output = ArrayList(u8).init(gpa);
-    }
-
-    pub export fn add(text: [*]const u8, len: usize) i32 {
-        const slice = text[0..len];
-        return addInternal(slice) catch -1;
-    }
-
-    fn addInternal(text: []const u8) !i32 {
-        var obj = try Parser.parse(gpa, text);
-        errdefer obj.deinit(gpa);
-        try vm.linker.objects.append(gpa, obj);
-        return @intCast(i32, vm.linker.objects.items.len - 1);
-    }
-
-    pub export fn update(id: u32, text: [*]const u8, len: usize) i32 {
-        const slice = text[0..len];
-        updateInternal(id, slice) catch return -1;
-        return 0;
-    }
-
-    fn updateInternal(id: u32, text: []const u8) !void {
-        if (id >= vm.linker.objects.items.len) return error.@"Id out of range";
-        const obj = try Parser.parse(gpa, text);
-        gpa.free(vm.linker.objects.items[id].text);
-        vm.linker.objects.items[id].deinit(gpa);
-        vm.linker.objects.items[id] = obj;
-    }
-
-    pub export fn link() i32 {
-        vm.linker.link(gpa) catch return -1;
-        return 0;
-    }
-
-    pub export fn call(name: [*]const u8, len: usize) i32 {
-        vm.call(gpa, name[0..len], Render, .{}) catch return -1;
-        return 0;
-    }
-
-    pub export fn reset() void {
-        for (vm.linker.objects.items) |obj| gpa.free(obj.text);
-        vm.deinit(gpa);
-        vm = .{};
-    }
-
-    const Render = struct {
-        pub fn write(_: Render, text: []const u8, index: u32, nl: u16) !void {
-            _ = index;
-            const writer = output.writer();
-            try writer.writeAll(text);
-            try writer.writeByteNTimes('\n', nl);
-        }
-
-        pub fn indent(_: Render, len: u16) !void {
-            const writer = output.writer();
-            try writer.writeByteNTimes(' ', len);
-        }
-    };
-
-# Machine
-
-Zangle represents documents as bytecode programs consisting mostly of `write`
-instructions to render code line-by-line with respect to the tag's indentation
-along with block writes for weaving literate source documents. Other
-instructions handle the order in which to tangle blocks of code such as
-`call` which embeds one block in another and `jmp` which threads adjacent
-blocks (by tag name) together into one.
-
-## Instructions
-
-Each instruction consists of an 8-bit opcode along with a 64-bit data argument.
-
-### Ret
-
-Pops the location and module in which the matching `call` instruction
-originated from. If any filters have been registered in the calling context
-then this instruction marks the end of the context and executes the action
-bound. The payload includes the index and length of the current procedure
-name which is provided as a parameter to rendering contexts.
-
-    lang: zig esc: none tag: #instruction list
-    ------------------------------------------
-
-    pub const Ret = extern struct {
-        start: u32,
-        len: u16,
-        pad: u16 = 0,
-    };
-
-
-<!-- -->
-
-    lang: zig esc: none tag: #parser codegen
-    ----------------------------------------
-
-    fn emitRet(
-        p: *Parser,
-        gpa: *Allocator,
-        params: Instruction.Data.Ret,
-    ) !void {
-        log.debug("emitting ret", .{});
-        try p.program.append(gpa, .{
-            .opcode = .ret,
-            .data = .{ .ret = params },
-        });
-    }
-
-Execution of the `ret` instruction.
-
-`ret` will invoke the `ret` method of the render context upon returning from
-a normal procedure and `terminate` upon reaching the end of the program. Of
-the parameters, `module` is that of the caller and `ip` points to the next
-instruction to be run which a rendering context can use to calculate the
-entry-point of the procedure.
-
-    lang: zig esc: none tag: #interpreter step
-    ------------------------------------------
-
-    fn execRet(vm: *Interpreter, comptime T: type, data: Instruction.Data.Ret, eval: T) !bool {
-        const name = vm.linker.objects.items[vm.module - 1]
-            .text[data.start .. data.start + data.len];
-
-        if (vm.stack.popOrNull()) |location| {
-            const mod = vm.module;
-            const ip = vm.ip;
-
-            vm.ip = location.value.ip;
-            vm.module = location.value.module;
-            vm.indent -= location.value.indent;
-
-            if (@hasDecl(Child(T), "ret")) try eval.ret(
-                vm.ip,
-                vm.module,
-                vm.indent,
-                name,
-            );
-            log.debug("[mod {d} ip {x:0>8}] ret(mod {d}, ip {x:0>8}, indent {d}, identifier '{s}')", .{
-                mod,
-                ip,
-                vm.module,
-                vm.ip,
-                vm.indent,
-                name,
-            });
-
-            return true;
-        }
-
-        if (@hasDecl(Child(T), "terminate")) try eval.terminate(name);
-        log.debug("[mod {d} ip {x:0>8}] terminate(identifier '{s}')", .{
-            vm.module,
-            vm.ip,
-            name,
-        });
-
-        return false;
-    }
-
-### Jmp
-
-Jumps to the specified address of the given module without pushing to the
-return stack. This instruction is primarily used to thread blocks with the
-same tag together across files in the order in which they occur within the
-literate source. If the target module is 0 then it's interpreted as being
-local to the current module.
-
-    lang: zig esc: none tag: #instruction list
-    ------------------------------------------
-
-    pub const Jmp = extern struct {
-        address: u32,
-        module: u16,
-        generation: u16 = 0,
-    };
-
-<!-- -->
-
-    lang: zig esc: none tag: #parser codegen
-    ----------------------------------------
-
-    fn writeJmp(
-        p: *Parser,
-        location: u32,
-        params: Instruction.Data.Jmp,
-    ) !void {
-        log.debug("writing jmp over {x:0>8} to {x:0>8}", .{
-            location,
-            params.address,
-        });
-        p.program.set(location, .{
-            .opcode = .jmp,
-            .data = .{ .jmp = params },
-        });
-    }
-
-
-
-### Call
-
-Saves the module context, instruction pointer, and calling context on the
-return stack before jumping to the specified address within the given module.
-If the target module is 0 then it's interpreted as being local to the
-current module.
-
-    lang: zig esc: none tag: #instruction list
-    ------------------------------------------
-
-    pub const Call = extern struct {
-        address: u32,
-        module: u16,
-        indent: u16,
-    };
-
-<!-- -->
-
-    lang: zig esc: none tag: #parser codegen
-    ----------------------------------------
-
-    fn emitCall(
-        p: *Parser,
-        gpa: *Allocator,
-        tag: []const u8,
-        params: Instruction.Data.Call,
-    ) !void {
-        log.debug("emitting call to {s}", .{tag});
-        const result = try p.symbols.getOrPut(gpa, tag);
-        if (!result.found_existing) {
-            result.value_ptr.* = .{};
-        }
-
-        try result.value_ptr.append(gpa, @intCast(u32, p.program.len));
-
-        try p.program.append(gpa, .{
-            .opcode = .call,
-            .data = .{ .call = params },
-        });
-    }
-
-### Shell
-
-Appends a calling context to the next `call` instruction with a shell command
-for filtering rendered content within the given block.
-
-    lang: zig esc: none tag: #instruction list
-    ------------------------------------------
-
-    pub const Shell = extern struct {
-        command: u32,
-        module: u16,
-        len: u8,
-        pad: u8,
-    };
-
-
-<!-- -->
-
-    lang: zig esc: none tag: #parser codegen
-    ----------------------------------------
-
-    fn emitShell(
-        p: *Parser,
-        gpa: *Allocator,
-        params: Instruction.Data.Shell,
-    ) !void {
-        log.debug("emitting shell command", .{});
-        try p.program.append(gpa, .{
-            .opcode = .shell,
-            .data = .{ .shell = params },
-        });
-    }
-
-### Write
-
-Writes lines of text from the current module to the output stream. If a
-calling context is present then the output is written to a buffer instead.
-A trail of newline characters is emitted after the text as specified in the
-`nl` field of the 64-bit data block.
-
-    lang: zig esc: none tag: #instruction list
-    ------------------------------------------
-
-    pub const Write = extern struct {
-        start: u32,
-        len: u16,
-        nl: u16,
-    };
-
-<!-- -->
-<!-- -->
-
-    lang: zig esc: none tag: #parser codegen
-    ----------------------------------------
-
-    fn emitWrite(
-        p: *Parser,
-        gpa: *Allocator,
-        params: Instruction.Data.Write,
-    ) !void {
-        log.debug("emitting write {x:0>8} len {d} nl {d}", .{
-            params.start,
-            params.len,
-            params.nl,
-        });
-        try p.program.append(gpa, .{
-            .opcode = .write,
-            .data = .{ .write = params },
-        });
-    }
-
-Instructions
-
-    lang: zig esc: [[]] file: lib/Instruction.zig
-    ---------------------------------------------
-
-    const std = @import("std");
-    const assert = std.debug.assert;
-
-    const Instruction = @This();
-
-    opcode: Opcode,
-    data: Data,
-
-    pub const List = std.MultiArrayList(Instruction);
-    pub const Opcode = enum(u8) {
-        ret,
-        call,
-        jmp,
-        shell,
-        write,
-    };
-
-    pub const Data = extern union {
-        ret: Ret,
-        jmp: Jmp,
-        call: Call,
-        shell: Shell,
-        write: Write,
-
-        [[instruction list]]
-    };
-
-    comptime {
-        assert(@sizeOf(Data) == 8);
-    }
-
-# Interpreters
-
-Rendering is handled by passing interpreters
-
-## Test interpreter
-
-    lang: zig esc: none tag: #interpreter step
-    ------------------------------------------
-
-    const Test = struct {
-        stream: Stream,
-
-        pub const Stream = std.io.FixedBufferStream([]u8);
-
-        pub fn write(self: *Test, text: []const u8, index: u32, nl: u16) !void {
-            _ = index;
-            const writer = self.stream.writer();
-            try writer.writeAll(text);
-            try writer.writeByteNTimes('\n', nl);
-        }
-
-        pub fn indent(self: *Test, len: u16) !void {
-            const writer = self.stream.writer();
-            try writer.writeByteNTimes(' ', len);
-        }
-
-        pub fn expect(self: *Test, expected: []const u8) !void {
-            try testing.expectEqualStrings(expected, self.stream.getWritten());
-        }
-    };
-
-    const TestTangleOutput = struct {
-        name: []const u8,
-        text: []const u8,
-    };
-
-    fn testTangle(source: []const []const u8, output: []const TestTangleOutput) !void {
-        var owned = true;
-        var l: Linker = .{};
-        defer if (owned) l.deinit(testing.allocator);
-
-        for (source) |src| {
-            const obj = try Parser.parse(testing.allocator, src);
-            try l.objects.append(testing.allocator, obj);
-        }
-
-        try l.link(testing.allocator);
-
-        var vm: Interpreter = .{ .linker = l };
-        defer vm.deinit(testing.allocator);
-        owned = false;
-
-        errdefer for (l.objects.items) |obj, i| {
-            log.debug("module {d}", .{i + 1});
-            for (obj.program.items(.opcode)) |op| {
-                log.debug("{}", .{op});
-            }
-        };
-
-        for (output) |out| {
-            log.debug("evaluating {s}", .{out.name});
-            var buffer: [4096]u8 = undefined;
-            var context: Test = .{ .stream = .{ .buffer = &buffer, .pos = 0 } };
-            try vm.call(testing.allocator, out.name, *Test, &context);
-            try context.expect(out.text);
-        }
-    }
-
-    test "run simple no calls" {
-        try testTangle(&.{
-            \\begin
-            \\
-            \\    lang: zig esc: none tag: #foo
-            \\    -----------------------------
-            \\
-            \\    abc
-            \\
-            \\end
-        }, &.{
-            .{ .name = "foo", .text = "abc" },
-        });
-    }
-
-    test "run multiple outputs no calls" {
-        try testTangle(&.{
-            \\begin
-            \\
-            \\    lang: zig esc: none tag: #foo
-            \\    -----------------------------
-            \\
-            \\    abc
-            \\
-            \\then
-            \\
-            \\    lang: zig esc: none tag: #bar
-            \\    -----------------------------
-            \\
-            \\    123
-            \\
-            \\end
-        }, &.{
-            .{ .name = "foo", .text = "abc" },
-            .{ .name = "bar", .text = "123" },
-        });
-    }
-
-    test "run multiple outputs common call" {
-        try testTangle(&.{
-            \\begin
-            \\
-            \\    lang: zig esc: [[]] tag: #foo
-            \\    -----------------------------
-            \\
-            \\    [[baz]]
-            \\
-            \\then
-            \\
-            \\    lang: zig esc: [[]] tag: #bar
-            \\    -----------------------------
-            \\
-            \\    [[baz]][[baz]]
-            \\
-            \\then
-            \\
-            \\    lang: zig esc: none tag: #baz
-            \\    -----------------------------
-            \\
-            \\    abc
-            \\
-            \\end
-        }, &.{
-            .{ .name = "baz", .text = "abc" },
-            .{ .name = "bar", .text = "abcabc" },
-            .{ .name = "foo", .text = "abc" },
-        });
-    }
-
-    test "run multiple outputs multiple inputs" {
-        try testTangle(&.{
-            \\begin
-            \\
-            \\    lang: zig esc: [[]] tag: #foo
-            \\    -----------------------------
-            \\
-            \\    [[baz]]
-            \\
-            \\end
-            ,
-            \\begin
-            \\
-            \\    lang: zig esc: [[]] tag: #bar
-            \\    -----------------------------
-            \\
-            \\    [[baz]][[baz]]
-            \\
-            \\begin
-            ,
-            \\end
-            \\
-            \\    lang: zig esc: none tag: #baz
-            \\    -----------------------------
-            \\
-            \\    abc
-            \\
-            \\end
-        }, &.{
-            .{ .name = "baz", .text = "abc" },
-            .{ .name = "bar", .text = "abcabc" },
-            .{ .name = "foo", .text = "abc" },
-        });
-    }
-
-
-<!-- -->
-
-    lang: zig esc: none tag: #interpreter step
-    ------------------------------------------
-
-    pub fn deinit(vm: *Interpreter, gpa: *Allocator) void {
-        vm.linker.deinit(gpa);
-        vm.stack.deinit(gpa);
-    }
-
-    fn Child(comptime T: type) type {
-        switch (@typeInfo(T)) {
-            .Pointer => |info| return info.child,
-            else => return T,
-        }
-    }
-
-    pub fn call(vm: *Interpreter, gpa: *Allocator, symbol: []const u8, comptime T: type, eval: T) !void {
-        if (vm.linker.procedures.get(symbol)) |sym| {
-            vm.ip = sym.entry;
-            vm.module = sym.module;
-            vm.indent = 0;
-            log.debug("calling {s} address {x:0>8} module {d}", .{ symbol, vm.ip, vm.module });
-            while (try vm.step(gpa, T, eval)) {}
-        } else return error.@"Unknown procedure";
-    }
-
-    pub fn callFile(vm: *Interpreter, gpa: *Allocator, symbol: []const u8, comptime T: type, eval: T) !void {
-        if (vm.linker.files.get(symbol)) |sym| {
-            vm.ip = sym.entry;
-            vm.module = sym.module;
-            vm.indent = 0;
-            log.debug("calling {s} address {x:0>8} module {d}", .{ symbol, vm.ip, vm.module });
-            while (try vm.step(gpa, T, eval)) {}
-        } else return error.@"Unknown procedure";
-    }
-
-<!-- -->
+## Interpreter main
 
     lang: zig esc: [[]] file: lib/Interpreter.zig
     ---------------------------------------------
@@ -1293,131 +1141,36 @@ Rendering is handled by passing interpreters
 
     [[interpreter step]]
 
-<!-- -->
-
-
-<!-- -->
-
-    lang: zig esc: none tag: #interpreter step
-    ------------------------------------------
-
-    fn execJmp(vm: *Interpreter, comptime T: type, data: Instruction.Data.Jmp, eval: T) !void {
-        const mod = vm.module;
-        const ip = vm.ip;
-
-        if (data.module != 0) {
-            vm.module = data.module;
-        }
-
-        vm.ip = data.address;
-
-        if (@hasDecl(Child(T), "jmp")) try eval.jmp(vm.ip, data.address);
-        if (@hasDecl(Child(T), "write")) try eval.write("\n", 0, 0);
-
-        log.debug("[mod {d} ip {x:0>8}] jmp(mod {d}, address {x:0>8})", .{
-            mod,
-            ip,
-            vm.module,
-            vm.ip,
-        });
-
-        vm.last_is_newline = true;
+    pub fn deinit(vm: *Interpreter, gpa: *Allocator) void {
+        vm.linker.deinit(gpa);
+        vm.stack.deinit(gpa);
     }
 
-<!-- -->
-
-    lang: zig esc: none tag: #interpreter step
-    ------------------------------------------
-
-    fn execCall(vm: *Interpreter, comptime T: type, data: Instruction.Data.Call, gpa: *Allocator, eval: T) !void {
-        if (vm.stack.contains(vm.ip)) {
-            return error.@"Cyclic reference detected";
+    fn Child(comptime T: type) type {
+        switch (@typeInfo(T)) {
+            .Pointer => |info| return info.child,
+            else => return T,
         }
-
-        const mod = vm.module;
-        const ip = vm.ip;
-
-        try vm.stack.put(gpa, vm.ip, .{
-            .ip = vm.ip,
-            .indent = data.indent,
-            .module = vm.module,
-        });
-
-        vm.indent += data.indent;
-        vm.ip = data.address;
-
-        if (data.module != 0) {
-            vm.module = data.module;
-        }
-
-        if (@hasDecl(Child(T), "call")) try eval.call(vm.ip, vm.module, vm.indent);
-        log.debug("[mod {d} ip {x:0>8}] call(mod {d}, ip {x:0>8})", .{
-            mod,
-            ip - 1,
-            vm.module,
-            vm.ip,
-        });
     }
 
-<!-- -->
-
-    lang: zig esc: none tag: #interpreter step
-    ------------------------------------------
-
-    fn execShell(
-        vm: *Interpreter,
-        comptime T: type,
-        data: Instruction.Data.Shell,
-        text: []const u8,
-        eval: T,
-    ) void {
-        if (@hasDecl(Child(T), "shell")) try eval.shell();
-        _ = vm;
-        _ = data;
-        _ = text;
-        @panic("TODO: implement shell");
+    pub fn call(vm: *Interpreter, gpa: *Allocator, symbol: []const u8, comptime T: type, eval: T) !void {
+        if (vm.linker.procedures.get(symbol)) |sym| {
+            vm.ip = sym.entry;
+            vm.module = sym.module;
+            vm.indent = 0;
+            log.debug("calling {s} address {x:0>8} module {d}", .{ symbol, vm.ip, vm.module });
+            while (try vm.step(gpa, T, eval)) {}
+        } else return error.@"Unknown procedure";
     }
 
-<!-- -->
-
-    lang: zig esc: none tag: #interpreter step
-    ------------------------------------------
-
-    fn execWrite(
-        vm: *Interpreter,
-        comptime T: type,
-        data: Instruction.Data.Write,
-        text: []const u8,
-        eval: T,
-    ) !void {
-        if (vm.should_indent and vm.last_is_newline) {
-            if (@hasDecl(Child(T), "indent")) try eval.indent(vm.indent);
-            log.debug("[mod {d} ip {x:0>8}] indent(len {d})", .{
-                vm.module,
-                vm.ip,
-                vm.indent,
-            });
-        } else {
-            vm.should_indent = true;
-        }
-
-        if (@hasDecl(Child(T), "write")) try eval.write(
-            text[data.start .. data.start + data.len],
-            data.start,
-            data.nl,
-        );
-
-        log.debug("[mod {d} ip {x:0>8}] write(text {*}, index {x:0>8}, len {d}, nl {d}): {s}", .{
-            vm.module,
-            vm.ip,
-            text,
-            data.start,
-            data.len,
-            data.nl,
-            text[data.start .. data.start + data.len],
-        });
-
-        vm.last_is_newline = data.nl != 0;
+    pub fn callFile(vm: *Interpreter, gpa: *Allocator, symbol: []const u8, comptime T: type, eval: T) !void {
+        if (vm.linker.files.get(symbol)) |sym| {
+            vm.ip = sym.entry;
+            vm.module = sym.module;
+            vm.indent = 0;
+            log.debug("calling {s} address {x:0>8} module {d}", .{ symbol, vm.ip, vm.module });
+            while (try vm.step(gpa, T, eval)) {}
+        } else return error.@"Unknown procedure";
     }
 
 # Linker
@@ -1487,14 +1240,22 @@ Rendering is handled by passing interpreters
         }
     };
 
-    [[linker]]
+    [[linker merge adjacent blocks method]]
+
+    [[linker build procedure table method]]
+
+    [[linker update procedure calls method]]
+
+    [[linker build file table method]]
+
+    [[linker link method]]
 
 ### Merge adjacent blocks
 
 TODO: short-circuit on non local module end
 
-    lang: zig esc: none tag: #linker
-    --------------------------------
+    lang: zig esc: none tag: #linker merge adjacent blocks method
+    -------------------------------------------------------------
 
     fn mergeAdjacent(l: *Linker) void {
         for (l.objects.items) |*obj, module| {
@@ -1616,8 +1377,8 @@ TODO: short-circuit on non local module end
 
 ### Register procedures
 
-    lang: zig esc: none tag: #linker
-    --------------------------------
+    lang: zig esc: none tag: #linker build procedure table method
+    -------------------------------------------------------------
 
     fn buildProcedureTable(l: *Linker, gpa: *Allocator) !void {
         log.debug("building procedure table", .{});
@@ -1641,8 +1402,8 @@ TODO: short-circuit on non local module end
 
 ### Update procedure calls
 
-    lang: zig esc: none tag: #linker
-    --------------------------------
+    lang: zig esc: none tag: #linker update procedure calls method
+    --------------------------------------------------------------
 
     fn updateProcedureCalls(l: *Linker) void {
         log.debug("updating procedure calls", .{});
@@ -1662,8 +1423,8 @@ TODO: short-circuit on non local module end
 
 ### Check for file conflicts and build a file table
 
-    lang: zig esc: none tag: #linker
-    --------------------------------
+    lang: zig esc: none tag: #linker build file table method
+    --------------------------------------------------------
 
     fn buildFileTable(l: *Linker, gpa: *Allocator) !void {
         for (l.objects.items) |obj, module| {
@@ -1678,8 +1439,8 @@ TODO: short-circuit on non local module end
 
 ### Link
 
-    lang: zig esc: none tag: #linker
-    --------------------------------
+    lang: zig esc: none tag: #linker link method
+    --------------------------------------------
 
     pub fn link(l: *Linker, gpa: *Allocator) !void {
         l.procedures.clearRetainingCapacity();
@@ -1745,15 +1506,7 @@ TODO: short-circuit on non local module end
         );
     }
 
-### Update call-sites
-
-Each call is updated with the correct entry point (address and module) for the
-
-# Format
-
-The default syntax consists of blocks indented by 4 spaces.
-
-## Parser
+# Parser
 
     lang: zig esc: [[]] file: lib/Parser.zig
     ----------------------------------------
@@ -1791,7 +1544,7 @@ The default syntax consists of blocks indented by 4 spaces.
     [[zangle parser primitives]]
     [[zangle parser]]
 
-### Token
+## Token
 
     lang: zig esc: none tag: #zangle tokenizer token
     ------------------------------------------------
@@ -1835,7 +1588,7 @@ The default syntax consists of blocks indented by 4 spaces.
         }
     };
 
-### Tokenizer
+## Tokenizer
 
     lang: zig esc: [[]] file: lib/Tokenizer.zig
     -------------------------------------------
@@ -2044,7 +1797,7 @@ Whitespace of the same type is consumed as a single token.
         try testTokenize("/file.example/path/../__", &.{.unknown});
     }
 
-### Header
+## Header
 
 Each code block starts with a header specifying the language used, delimiters
 for code block imports, and either a file in which the content should be
@@ -2245,180 +1998,8 @@ start at the end. This allows the user to click through to the next block.
         return header;
     }
 
-    test "parse header line" {
-        const complete_header = "lang: zig esc: {{}} tag: #hash\n    ------------------------------\n\n";
-        const common: Header = .{
-            .language = "zig",
-            .delimiter = "{{}}",
-            .resource = .{
-                .start = @intCast(u32, mem.indexOf(u8, complete_header, "hash").?),
-                .len = 4,
-            },
-            .type = .tag,
-        };
+## Body
 
-        try testing.expectError(
-            error.@"Expected a space between 'lang:' and the language name",
-            testParseHeader("lang:zig", common),
-        );
-
-        try testing.expectError(
-            error.@"Missing 'esc:' delimiter specification",
-            testParseHeader("lang: zig ", common),
-        );
-
-        try testing.expectError(
-            error.@"Missing ':' after 'esc'",
-            testParseHeader("lang: zig esc", common),
-        );
-
-        try testing.expectError(
-            error.@"Expected a space between 'esc:' and the delimiter specification",
-            testParseHeader("lang: zig esc:", common),
-        );
-
-        try testing.expectError(
-            error.@"Expected closing delimiter",
-            testParseHeader("lang: zig esc: {", common),
-        );
-
-        try testing.expectError(
-            error.@"Expected matching closing angle bracket '>'",
-            testParseHeader("lang: zig esc: <}", common),
-        );
-
-        try testing.expectError(
-            error.@"Expected matching closing brace '}'",
-            testParseHeader("lang: zig esc: {>", common),
-        );
-
-        try testing.expectError(
-            error.@"Expected matching closing bracket ']'",
-            testParseHeader("lang: zig esc: [>", common),
-        );
-
-        try testing.expectError(
-            error.@"Expected matching closing paren ')'",
-            testParseHeader("lang: zig esc: (>", common),
-        );
-
-        try testing.expectError(
-            error.@"Invalid delimiter, expected one of '<', '{', '[', '('",
-            testParseHeader("lang: zig esc: foo", common),
-        );
-
-        try testing.expectError(
-            error.@"Invalid delimiter, expected one of '>', '}', ']', ')'",
-            testParseHeader("lang: zig esc: <oo", common),
-        );
-
-        try testing.expectError(
-            error.@"Expected opening and closing delimiter lengths to match",
-            testParseHeader("lang: zig esc: {}}", common),
-        );
-
-        try testing.expectError(
-            error.@"Expected a space after delimiter specification",
-            testParseHeader("lang: zig esc: {{}}", common),
-        );
-
-        try testing.expectError(
-            error.@"Expected 'tag:' or 'file:' following delimiter specification",
-            testParseHeader("lang: zig esc: {{}} ", common),
-        );
-
-        try testing.expectError(
-            error.@"Invalid option given, expected 'tag:' or 'file:'",
-            testParseHeader("lang: zig esc: {{}} none", common),
-        );
-
-        try testing.expectError(
-            error.@"Missing ':' after 'file'",
-            testParseHeader("lang: zig esc: {{}} file", common),
-        );
-
-        try testing.expectError(
-            error.@"Expected a space after 'file:'",
-            testParseHeader("lang: zig esc: {{}} file:", common),
-        );
-
-        try testing.expectError(
-            error.@"Missing file name",
-            testParseHeader("lang: zig esc: {{}} file: \n", common),
-        );
-
-        try testing.expectError(
-            error.@"Missing ':' after 'tag'",
-            testParseHeader("lang: zig esc: {{}} tag", common),
-        );
-
-        try testing.expectError(
-            error.@"Expected a space after 'tag:'",
-            testParseHeader("lang: zig esc: {{}} tag:", common),
-        );
-
-        try testing.expectError(
-            error.@"Missing '#' after 'tag: '",
-            testParseHeader("lang: zig esc: {{}} tag: ", common),
-        );
-
-        try testing.expectError(
-            error.@"Expected a newline after the header",
-            testParseHeader("lang: zig esc: {{}} tag: #", common),
-        );
-
-        try testing.expectError(
-            error.@"Missing tag name",
-            testParseHeader("lang: zig esc: {{}} tag: #\n", common),
-        );
-
-        try testing.expectError(
-            error.@"Expected the dividing line to be indented by 4 spaces",
-            testParseHeader("lang: zig esc: {{}} tag: #hash\n", common),
-        );
-
-        try testing.expectError(
-            error.@"Expected a dividing line of '-' of the same length as the header",
-            testParseHeader("lang: zig esc: {{}} tag: #hash\n    ", common),
-        );
-
-        try testing.expectError(
-            error.@"Expected the division line to be of the same length as the header",
-            testParseHeader("lang: zig esc: {{}} tag: #hash\n    ----------------", common),
-        );
-
-        try testing.expectError(
-            error.@"Expected at least one blank line after the division line",
-            testParseHeader("lang: zig esc: {{}} tag: #hash\n    ------------------------------", common),
-        );
-
-        try testing.expectError(
-            error.@"Expected at least one blank line after the division line",
-            testParseHeader("lang: zig esc: {{}} tag: #hash\n    ------------------------------\n", common),
-        );
-
-        try testParseHeader(complete_header, common);
-    }
-
-    fn testParseHeader(text: []const u8, expected: Header) !void {
-        var p: Parser = .{ .it = .{ .bytes = text } };
-        const header = try p.parseHeaderLine();
-
-        testing.expectEqualStrings(expected.language, header.language) catch return error.@"Language is not the same";
-
-        if (expected.delimiter != null and header.delimiter != null) {
-            testing.expectEqualStrings(expected.language, header.language) catch return error.@"Delimiter is not the same";
-        } else if (expected.delimiter == null and header.delimiter != null) {
-            return error.@"Expected delimiter to be null";
-        } else if (expected.delimiter != null and header.delimiter == null) {
-            return error.@"Expected delimiter to not be null";
-        }
-
-        testing.expectEqual(expected.resource, header.resource) catch return error.@"Resource is not the same";
-        testing.expectEqual(expected.type, header.type) catch return error.@"Type is not the same";
-    }
-
-### Body
 TODO: link tags to their definition
 
     lang: zig esc: none tag: #zangle parser
@@ -2518,7 +2099,7 @@ TODO: link tags to their definition
         });
     }
 
-Delimiters
+#### Delimiters
 
     lang: zig esc: none tag: #zangle parser
     ---------------------------------------
@@ -2716,6 +2297,184 @@ Pipes pass code blocks through external programs.
         return false;
     }
 
+# Appendix. Parser tests
+
+    lang: zig esc: none tag: #zangle parser
+    ---------------------------------------
+
+    test "parse header line" {
+        const complete_header = "lang: zig esc: {{}} tag: #hash\n    ------------------------------\n\n";
+        const common: Header = .{
+            .language = "zig",
+            .delimiter = "{{}}",
+            .resource = .{
+                .start = @intCast(u32, mem.indexOf(u8, complete_header, "hash").?),
+                .len = 4,
+            },
+            .type = .tag,
+        };
+
+        try testing.expectError(
+            error.@"Expected a space between 'lang:' and the language name",
+            testParseHeader("lang:zig", common),
+        );
+
+        try testing.expectError(
+            error.@"Missing 'esc:' delimiter specification",
+            testParseHeader("lang: zig ", common),
+        );
+
+        try testing.expectError(
+            error.@"Missing ':' after 'esc'",
+            testParseHeader("lang: zig esc", common),
+        );
+
+        try testing.expectError(
+            error.@"Expected a space between 'esc:' and the delimiter specification",
+            testParseHeader("lang: zig esc:", common),
+        );
+
+        try testing.expectError(
+            error.@"Expected closing delimiter",
+            testParseHeader("lang: zig esc: {", common),
+        );
+
+        try testing.expectError(
+            error.@"Expected matching closing angle bracket '>'",
+            testParseHeader("lang: zig esc: <}", common),
+        );
+
+        try testing.expectError(
+            error.@"Expected matching closing brace '}'",
+            testParseHeader("lang: zig esc: {>", common),
+        );
+
+        try testing.expectError(
+            error.@"Expected matching closing bracket ']'",
+            testParseHeader("lang: zig esc: [>", common),
+        );
+
+        try testing.expectError(
+            error.@"Expected matching closing paren ')'",
+            testParseHeader("lang: zig esc: (>", common),
+        );
+
+        try testing.expectError(
+            error.@"Invalid delimiter, expected one of '<', '{', '[', '('",
+            testParseHeader("lang: zig esc: foo", common),
+        );
+
+        try testing.expectError(
+            error.@"Invalid delimiter, expected one of '>', '}', ']', ')'",
+            testParseHeader("lang: zig esc: <oo", common),
+        );
+
+        try testing.expectError(
+            error.@"Expected opening and closing delimiter lengths to match",
+            testParseHeader("lang: zig esc: {}}", common),
+        );
+
+        try testing.expectError(
+            error.@"Expected a space after delimiter specification",
+            testParseHeader("lang: zig esc: {{}}", common),
+        );
+
+        try testing.expectError(
+            error.@"Expected 'tag:' or 'file:' following delimiter specification",
+            testParseHeader("lang: zig esc: {{}} ", common),
+        );
+
+        try testing.expectError(
+            error.@"Invalid option given, expected 'tag:' or 'file:'",
+            testParseHeader("lang: zig esc: {{}} none", common),
+        );
+
+        try testing.expectError(
+            error.@"Missing ':' after 'file'",
+            testParseHeader("lang: zig esc: {{}} file", common),
+        );
+
+        try testing.expectError(
+            error.@"Expected a space after 'file:'",
+            testParseHeader("lang: zig esc: {{}} file:", common),
+        );
+
+        try testing.expectError(
+            error.@"Missing file name",
+            testParseHeader("lang: zig esc: {{}} file: \n", common),
+        );
+
+        try testing.expectError(
+            error.@"Missing ':' after 'tag'",
+            testParseHeader("lang: zig esc: {{}} tag", common),
+        );
+
+        try testing.expectError(
+            error.@"Expected a space after 'tag:'",
+            testParseHeader("lang: zig esc: {{}} tag:", common),
+        );
+
+        try testing.expectError(
+            error.@"Missing '#' after 'tag: '",
+            testParseHeader("lang: zig esc: {{}} tag: ", common),
+        );
+
+        try testing.expectError(
+            error.@"Expected a newline after the header",
+            testParseHeader("lang: zig esc: {{}} tag: #", common),
+        );
+
+        try testing.expectError(
+            error.@"Missing tag name",
+            testParseHeader("lang: zig esc: {{}} tag: #\n", common),
+        );
+
+        try testing.expectError(
+            error.@"Expected the dividing line to be indented by 4 spaces",
+            testParseHeader("lang: zig esc: {{}} tag: #hash\n", common),
+        );
+
+        try testing.expectError(
+            error.@"Expected a dividing line of '-' of the same length as the header",
+            testParseHeader("lang: zig esc: {{}} tag: #hash\n    ", common),
+        );
+
+        try testing.expectError(
+            error.@"Expected the division line to be of the same length as the header",
+            testParseHeader("lang: zig esc: {{}} tag: #hash\n    ----------------", common),
+        );
+
+        try testing.expectError(
+            error.@"Expected at least one blank line after the division line",
+            testParseHeader("lang: zig esc: {{}} tag: #hash\n    ------------------------------", common),
+        );
+
+        try testing.expectError(
+            error.@"Expected at least one blank line after the division line",
+            testParseHeader("lang: zig esc: {{}} tag: #hash\n    ------------------------------\n", common),
+        );
+
+        try testParseHeader(complete_header, common);
+    }
+
+    fn testParseHeader(text: []const u8, expected: Header) !void {
+        var p: Parser = .{ .it = .{ .bytes = text } };
+        const header = try p.parseHeaderLine();
+
+        testing.expectEqualStrings(expected.language, header.language) catch return error.@"Language is not the same";
+
+        if (expected.delimiter != null and header.delimiter != null) {
+            testing.expectEqualStrings(expected.language, header.language) catch return error.@"Delimiter is not the same";
+        } else if (expected.delimiter == null and header.delimiter != null) {
+            return error.@"Expected delimiter to be null";
+        } else if (expected.delimiter != null and header.delimiter == null) {
+            return error.@"Expected delimiter to not be null";
+        }
+
+        testing.expectEqual(expected.resource, header.resource) catch return error.@"Resource is not the same";
+        testing.expectEqual(expected.type, header.type) catch return error.@"Type is not the same";
+    }
+
     const TestCompileResult = struct {
         program: []const Instruction.Opcode,
         symbols: []const []const u8,
@@ -2842,7 +2601,7 @@ Pipes pass code blocks through external programs.
         });
     }
 
-\begin{comment}
+<!-- -->
 
     lang: zig esc: none tag: #zangle tokenizer tests
     ------------------------------------------------
@@ -2858,6 +2617,152 @@ Pipes pass code blocks through external programs.
         const token = it.next();
         try testing.expectEqual(Token.Tag.eof, token.tag);
         try testing.expectEqual(text.len, token.end);
+    }
+
+# Appendix. Interpreter tests
+
+    lang: zig esc: none tag: #interpreter tests
+    -------------------------------------------
+
+    const TestTangleOutput = struct {
+        name: []const u8,
+        text: []const u8,
+    };
+
+    fn testTangle(source: []const []const u8, output: []const TestTangleOutput) !void {
+        var owned = true;
+        var l: Linker = .{};
+        defer if (owned) l.deinit(testing.allocator);
+
+        for (source) |src| {
+            const obj = try Parser.parse(testing.allocator, src);
+            try l.objects.append(testing.allocator, obj);
+        }
+
+        try l.link(testing.allocator);
+
+        var vm: Interpreter = .{ .linker = l };
+        defer vm.deinit(testing.allocator);
+        owned = false;
+
+        errdefer for (l.objects.items) |obj, i| {
+            log.debug("module {d}", .{i + 1});
+            for (obj.program.items(.opcode)) |op| {
+                log.debug("{}", .{op});
+            }
+        };
+
+        for (output) |out| {
+            log.debug("evaluating {s}", .{out.name});
+            var buffer: [4096]u8 = undefined;
+            var context: Test = .{ .stream = .{ .buffer = &buffer, .pos = 0 } };
+            try vm.call(testing.allocator, out.name, *Test, &context);
+            try context.expect(out.text);
+        }
+    }
+
+    test "run simple no calls" {
+        try testTangle(&.{
+            \\begin
+            \\
+            \\    lang: zig esc: none tag: #foo
+            \\    -----------------------------
+            \\
+            \\    abc
+            \\
+            \\end
+        }, &.{
+            .{ .name = "foo", .text = "abc" },
+        });
+    }
+
+    test "run multiple outputs no calls" {
+        try testTangle(&.{
+            \\begin
+            \\
+            \\    lang: zig esc: none tag: #foo
+            \\    -----------------------------
+            \\
+            \\    abc
+            \\
+            \\then
+            \\
+            \\    lang: zig esc: none tag: #bar
+            \\    -----------------------------
+            \\
+            \\    123
+            \\
+            \\end
+        }, &.{
+            .{ .name = "foo", .text = "abc" },
+            .{ .name = "bar", .text = "123" },
+        });
+    }
+
+    test "run multiple outputs common call" {
+        try testTangle(&.{
+            \\begin
+            \\
+            \\    lang: zig esc: [[]] tag: #foo
+            \\    -----------------------------
+            \\
+            \\    [[baz]]
+            \\
+            \\then
+            \\
+            \\    lang: zig esc: [[]] tag: #bar
+            \\    -----------------------------
+            \\
+            \\    [[baz]][[baz]]
+            \\
+            \\then
+            \\
+            \\    lang: zig esc: none tag: #baz
+            \\    -----------------------------
+            \\
+            \\    abc
+            \\
+            \\end
+        }, &.{
+            .{ .name = "baz", .text = "abc" },
+            .{ .name = "bar", .text = "abcabc" },
+            .{ .name = "foo", .text = "abc" },
+        });
+    }
+
+    test "run multiple outputs multiple inputs" {
+        try testTangle(&.{
+            \\begin
+            \\
+            \\    lang: zig esc: [[]] tag: #foo
+            \\    -----------------------------
+            \\
+            \\    [[baz]]
+            \\
+            \\end
+            ,
+            \\begin
+            \\
+            \\    lang: zig esc: [[]] tag: #bar
+            \\    -----------------------------
+            \\
+            \\    [[baz]][[baz]]
+            \\
+            \\begin
+            ,
+            \\end
+            \\
+            \\    lang: zig esc: none tag: #baz
+            \\    -----------------------------
+            \\
+            \\    abc
+            \\
+            \\end
+        }, &.{
+            .{ .name = "baz", .text = "abc" },
+            .{ .name = "bar", .text = "abcabc" },
+            .{ .name = "foo", .text = "abc" },
+        });
     }
 
 # Appendix. Parser primitives
@@ -2932,4 +2837,83 @@ Pipes pass code blocks through external programs.
         }
     }
 
-\end{comment}
+# Appendix. Wasm interface
+
+    lang: zig esc: none file: lib/wasm.zig
+    --------------------------------------
+
+    const std = @import("std");
+    const lib = @import("lib.zig");
+
+    const Interpreter = lib.Interpreter;
+    const Parser = lib.Parser;
+    const ArrayList = std.ArrayList;
+
+    var vm: Interpreter = .{};
+    var instance = std.heap.GeneralPurposeAllocator(.{}){};
+    var output: ArrayList(u8) = undefined;
+    const gpa = &instance.allocator;
+
+    pub export fn init() void {
+        output = ArrayList(u8).init(gpa);
+    }
+
+    pub export fn add(text: [*]const u8, len: usize) i32 {
+        const slice = text[0..len];
+        return addInternal(slice) catch -1;
+    }
+
+    fn addInternal(text: []const u8) !i32 {
+        var obj = try Parser.parse(gpa, text);
+        errdefer obj.deinit(gpa);
+        try vm.linker.objects.append(gpa, obj);
+        return @intCast(i32, vm.linker.objects.items.len - 1);
+    }
+
+    pub export fn update(id: u32, text: [*]const u8, len: usize) i32 {
+        const slice = text[0..len];
+        updateInternal(id, slice) catch return -1;
+        return 0;
+    }
+
+    fn updateInternal(id: u32, text: []const u8) !void {
+        if (id >= vm.linker.objects.items.len) return error.@"Id out of range";
+        const obj = try Parser.parse(gpa, text);
+        gpa.free(vm.linker.objects.items[id].text);
+        vm.linker.objects.items[id].deinit(gpa);
+        vm.linker.objects.items[id] = obj;
+    }
+
+    pub export fn link() i32 {
+        vm.linker.link(gpa) catch return -1;
+        return 0;
+    }
+
+    pub export fn call(name: [*]const u8, len: usize) i32 {
+        vm.call(gpa, name[0..len], Render, .{}) catch return -1;
+        return 0;
+    }
+
+    pub export fn reset() void {
+        for (vm.linker.objects.items) |obj| gpa.free(obj.text);
+        vm.deinit(gpa);
+        vm = .{};
+    }
+
+    const Render = struct {
+        pub fn write(_: Render, text: []const u8, index: u32, nl: u16) !void {
+            _ = index;
+            const writer = output.writer();
+            try writer.writeAll(text);
+            try writer.writeByteNTimes('\n', nl);
+        }
+
+        pub fn indent(_: Render, len: u16) !void {
+            const writer = output.writer();
+            try writer.writeByteNTimes(' ', len);
+        }
+    };
+
+<!-- -->
+
+

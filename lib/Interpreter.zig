@@ -86,199 +86,6 @@ fn execRet(vm: *Interpreter, comptime T: type, data: Instruction.Data.Ret, eval:
 
     return false;
 }
-const Test = struct {
-    stream: Stream,
-
-    pub const Stream = std.io.FixedBufferStream([]u8);
-
-    pub fn write(self: *Test, text: []const u8, index: u32, nl: u16) !void {
-        _ = index;
-        const writer = self.stream.writer();
-        try writer.writeAll(text);
-        try writer.writeByteNTimes('\n', nl);
-    }
-
-    pub fn indent(self: *Test, len: u16) !void {
-        const writer = self.stream.writer();
-        try writer.writeByteNTimes(' ', len);
-    }
-
-    pub fn expect(self: *Test, expected: []const u8) !void {
-        try testing.expectEqualStrings(expected, self.stream.getWritten());
-    }
-};
-
-const TestTangleOutput = struct {
-    name: []const u8,
-    text: []const u8,
-};
-
-fn testTangle(source: []const []const u8, output: []const TestTangleOutput) !void {
-    var owned = true;
-    var l: Linker = .{};
-    defer if (owned) l.deinit(testing.allocator);
-
-    for (source) |src| {
-        const obj = try Parser.parse(testing.allocator, src);
-        try l.objects.append(testing.allocator, obj);
-    }
-
-    try l.link(testing.allocator);
-
-    var vm: Interpreter = .{ .linker = l };
-    defer vm.deinit(testing.allocator);
-    owned = false;
-
-    errdefer for (l.objects.items) |obj, i| {
-        log.debug("module {d}", .{i + 1});
-        for (obj.program.items(.opcode)) |op| {
-            log.debug("{}", .{op});
-        }
-    };
-
-    for (output) |out| {
-        log.debug("evaluating {s}", .{out.name});
-        var buffer: [4096]u8 = undefined;
-        var context: Test = .{ .stream = .{ .buffer = &buffer, .pos = 0 } };
-        try vm.call(testing.allocator, out.name, *Test, &context);
-        try context.expect(out.text);
-    }
-}
-
-test "run simple no calls" {
-    try testTangle(&.{
-        \\begin
-        \\
-        \\    lang: zig esc: none tag: #foo
-        \\    -----------------------------
-        \\
-        \\    abc
-        \\
-        \\end
-    }, &.{
-        .{ .name = "foo", .text = "abc" },
-    });
-}
-
-test "run multiple outputs no calls" {
-    try testTangle(&.{
-        \\begin
-        \\
-        \\    lang: zig esc: none tag: #foo
-        \\    -----------------------------
-        \\
-        \\    abc
-        \\
-        \\then
-        \\
-        \\    lang: zig esc: none tag: #bar
-        \\    -----------------------------
-        \\
-        \\    123
-        \\
-        \\end
-    }, &.{
-        .{ .name = "foo", .text = "abc" },
-        .{ .name = "bar", .text = "123" },
-    });
-}
-
-test "run multiple outputs common call" {
-    try testTangle(&.{
-        \\begin
-        \\
-        \\    lang: zig esc: [[]] tag: #foo
-        \\    -----------------------------
-        \\
-        \\    [[baz]]
-        \\
-        \\then
-        \\
-        \\    lang: zig esc: [[]] tag: #bar
-        \\    -----------------------------
-        \\
-        \\    [[baz]][[baz]]
-        \\
-        \\then
-        \\
-        \\    lang: zig esc: none tag: #baz
-        \\    -----------------------------
-        \\
-        \\    abc
-        \\
-        \\end
-    }, &.{
-        .{ .name = "baz", .text = "abc" },
-        .{ .name = "bar", .text = "abcabc" },
-        .{ .name = "foo", .text = "abc" },
-    });
-}
-
-test "run multiple outputs multiple inputs" {
-    try testTangle(&.{
-        \\begin
-        \\
-        \\    lang: zig esc: [[]] tag: #foo
-        \\    -----------------------------
-        \\
-        \\    [[baz]]
-        \\
-        \\end
-        ,
-        \\begin
-        \\
-        \\    lang: zig esc: [[]] tag: #bar
-        \\    -----------------------------
-        \\
-        \\    [[baz]][[baz]]
-        \\
-        \\begin
-        ,
-        \\end
-        \\
-        \\    lang: zig esc: none tag: #baz
-        \\    -----------------------------
-        \\
-        \\    abc
-        \\
-        \\end
-    }, &.{
-        .{ .name = "baz", .text = "abc" },
-        .{ .name = "bar", .text = "abcabc" },
-        .{ .name = "foo", .text = "abc" },
-    });
-}
-pub fn deinit(vm: *Interpreter, gpa: *Allocator) void {
-    vm.linker.deinit(gpa);
-    vm.stack.deinit(gpa);
-}
-
-fn Child(comptime T: type) type {
-    switch (@typeInfo(T)) {
-        .Pointer => |info| return info.child,
-        else => return T,
-    }
-}
-
-pub fn call(vm: *Interpreter, gpa: *Allocator, symbol: []const u8, comptime T: type, eval: T) !void {
-    if (vm.linker.procedures.get(symbol)) |sym| {
-        vm.ip = sym.entry;
-        vm.module = sym.module;
-        vm.indent = 0;
-        log.debug("calling {s} address {x:0>8} module {d}", .{ symbol, vm.ip, vm.module });
-        while (try vm.step(gpa, T, eval)) {}
-    } else return error.@"Unknown procedure";
-}
-
-pub fn callFile(vm: *Interpreter, gpa: *Allocator, symbol: []const u8, comptime T: type, eval: T) !void {
-    if (vm.linker.files.get(symbol)) |sym| {
-        vm.ip = sym.entry;
-        vm.module = sym.module;
-        vm.indent = 0;
-        log.debug("calling {s} address {x:0>8} module {d}", .{ symbol, vm.ip, vm.module });
-        while (try vm.step(gpa, T, eval)) {}
-    } else return error.@"Unknown procedure";
-}
 fn execJmp(vm: *Interpreter, comptime T: type, data: Instruction.Data.Jmp, eval: T) !void {
     const mod = vm.module;
     const ip = vm.ip;
@@ -378,4 +185,57 @@ fn execWrite(
     });
 
     vm.last_is_newline = data.nl != 0;
+}
+const Test = struct {
+    stream: Stream,
+
+    pub const Stream = std.io.FixedBufferStream([]u8);
+
+    pub fn write(self: *Test, text: []const u8, index: u32, nl: u16) !void {
+        _ = index;
+        const writer = self.stream.writer();
+        try writer.writeAll(text);
+        try writer.writeByteNTimes('\n', nl);
+    }
+
+    pub fn indent(self: *Test, len: u16) !void {
+        const writer = self.stream.writer();
+        try writer.writeByteNTimes(' ', len);
+    }
+
+    pub fn expect(self: *Test, expected: []const u8) !void {
+        try testing.expectEqualStrings(expected, self.stream.getWritten());
+    }
+};
+
+pub fn deinit(vm: *Interpreter, gpa: *Allocator) void {
+    vm.linker.deinit(gpa);
+    vm.stack.deinit(gpa);
+}
+
+fn Child(comptime T: type) type {
+    switch (@typeInfo(T)) {
+        .Pointer => |info| return info.child,
+        else => return T,
+    }
+}
+
+pub fn call(vm: *Interpreter, gpa: *Allocator, symbol: []const u8, comptime T: type, eval: T) !void {
+    if (vm.linker.procedures.get(symbol)) |sym| {
+        vm.ip = sym.entry;
+        vm.module = sym.module;
+        vm.indent = 0;
+        log.debug("calling {s} address {x:0>8} module {d}", .{ symbol, vm.ip, vm.module });
+        while (try vm.step(gpa, T, eval)) {}
+    } else return error.@"Unknown procedure";
+}
+
+pub fn callFile(vm: *Interpreter, gpa: *Allocator, symbol: []const u8, comptime T: type, eval: T) !void {
+    if (vm.linker.files.get(symbol)) |sym| {
+        vm.ip = sym.entry;
+        vm.module = sym.module;
+        vm.indent = 0;
+        log.debug("calling {s} address {x:0>8} module {d}", .{ symbol, vm.ip, vm.module });
+        while (try vm.step(gpa, T, eval)) {}
+    } else return error.@"Unknown procedure";
 }

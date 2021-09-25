@@ -177,6 +177,7 @@ test "merge" {
         obj_a.program.items(.data)[3].jmp,
     );
 }
+
 fn buildProcedureTable(l: *Linker, gpa: *Allocator) !void {
     log.debug("building procedure table", .{});
     for (l.objects.items) |obj, module| {
@@ -196,6 +197,7 @@ fn buildProcedureTable(l: *Linker, gpa: *Allocator) !void {
     }
     log.debug("registered {d} procedures", .{l.procedures.count()});
 }
+
 fn updateProcedureCalls(l: *Linker) void {
     log.debug("updating procedure calls", .{});
     for (l.procedures.keys()) |key, i| {
@@ -211,6 +213,7 @@ fn updateProcedureCalls(l: *Linker) void {
         };
     }
 }
+
 fn buildFileTable(l: *Linker, gpa: *Allocator) !void {
     for (l.objects.items) |obj, module| {
         for (obj.files.keys()) |key, i| {
@@ -221,6 +224,7 @@ fn buildFileTable(l: *Linker, gpa: *Allocator) !void {
         }
     }
 }
+
 pub fn link(l: *Linker, gpa: *Allocator) !void {
     l.procedures.clearRetainingCapacity();
     l.files.clearRetainingCapacity();
