@@ -898,10 +898,10 @@ Rendering is handled by passing a context in which to run the program.
             try writer.writeByteNTimes('\n', nl);
         }
 
-        pub fn indent(self: *Test, vm: *Interpreter, len: u16) !void {
+        pub fn indent(self: *Test, vm: *Interpreter) !void {
             _ = vm;
             const writer = self.stream.writer();
-            try writer.writeByteNTimes(' ', len);
+            try writer.writeByteNTimes(' ', vm.indent);
         }
 
         pub fn expect(self: *Test, expected: []const u8) !void {
@@ -1175,6 +1175,8 @@ Rendering is handled by passing a context in which to run the program.
             while (try vm.step(gpa, T, eval)) {}
         } else return error.@"Unknown procedure";
     }
+
+    [[interpreter tests]]
 
 # Linker
 

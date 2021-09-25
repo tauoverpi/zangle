@@ -198,10 +198,10 @@ const Test = struct {
         try writer.writeByteNTimes('\n', nl);
     }
 
-    pub fn indent(self: *Test, vm: *Interpreter, len: u16) !void {
+    pub fn indent(self: *Test, vm: *Interpreter) !void {
         _ = vm;
         const writer = self.stream.writer();
-        try writer.writeByteNTimes(' ', len);
+        try writer.writeByteNTimes(' ', vm.indent);
     }
 
     pub fn expect(self: *Test, expected: []const u8) !void {
@@ -239,4 +239,145 @@ pub fn callFile(vm: *Interpreter, gpa: *Allocator, symbol: []const u8, comptime 
         log.debug("calling {s} address {x:0>8} module {d}", .{ symbol, vm.ip, vm.module });
         while (try vm.step(gpa, T, eval)) {}
     } else return error.@"Unknown procedure";
+}
+
+const TestTangleOutput = struct {
+    name: []const u8,
+    text: []const u8,
+};
+
+fn testTangle(source: []const []const u8, output: []const TestTangleOutput) !void {
+    var owned = true;
+    var l: Linker = .{};
+    defer if (owned) l.deinit(testing.allocator);
+
+    for (source) |src| {
+        const obj = try Parser.parse(testing.allocator, src);
+        try l.objects.append(testing.allocator, obj);
+    }
+
+    try l.link(testing.allocator);
+
+    var vm: Interpreter = .{ .linker = l };
+    defer vm.deinit(testing.allocator);
+    owned = false;
+
+    errdefer for (l.objects.items) |obj, i| {
+        log.debug("module {d}", .{i + 1});
+        for (obj.program.items(.opcode)) |op| {
+            log.debug("{}", .{op});
+        }
+    };
+
+    for (output) |out| {
+        log.debug("evaluating {s}", .{out.name});
+        var buffer: [4096]u8 = undefined;
+        var context: Test = .{ .stream = .{ .buffer = &buffer, .pos = 0 } };
+        try vm.call(testing.allocator, out.name, *Test, &context);
+        try context.expect(out.text);
+    }
+}
+
+test "run simple no calls" {
+    try testTangle(&.{
+        \\begin
+        \\
+        \\    lang: zig esc: none tag: #foo
+        \\    -----------------------------
+        \\
+        \\    abc
+        \\
+        \\end
+    }, &.{
+        .{ .name = "foo", .text = "abc" },
+    });
+}
+
+test "run multiple outputs no calls" {
+    try testTangle(&.{
+        \\begin
+        \\
+        \\    lang: zig esc: none tag: #foo
+        \\    -----------------------------
+        \\
+        \\    abc
+        \\
+        \\then
+        \\
+        \\    lang: zig esc: none tag: #bar
+        \\    -----------------------------
+        \\
+        \\    123
+        \\
+        \\end
+    }, &.{
+        .{ .name = "foo", .text = "abc" },
+        .{ .name = "bar", .text = "123" },
+    });
+}
+
+test "run multiple outputs common call" {
+    try testTangle(&.{
+        \\begin
+        \\
+        \\    lang: zig esc: [[]] tag: #foo
+        \\    -----------------------------
+        \\
+        \\    [[baz]]
+        \\
+        \\then
+        \\
+        \\    lang: zig esc: [[]] tag: #bar
+        \\    -----------------------------
+        \\
+        \\    [[baz]][[baz]]
+        \\
+        \\then
+        \\
+        \\    lang: zig esc: none tag: #baz
+        \\    -----------------------------
+        \\
+        \\    abc
+        \\
+        \\end
+    }, &.{
+        .{ .name = "baz", .text = "abc" },
+        .{ .name = "bar", .text = "abcabc" },
+        .{ .name = "foo", .text = "abc" },
+    });
+}
+
+test "run multiple outputs multiple inputs" {
+    try testTangle(&.{
+        \\begin
+        \\
+        \\    lang: zig esc: [[]] tag: #foo
+        \\    -----------------------------
+        \\
+        \\    [[baz]]
+        \\
+        \\end
+        ,
+        \\begin
+        \\
+        \\    lang: zig esc: [[]] tag: #bar
+        \\    -----------------------------
+        \\
+        \\    [[baz]][[baz]]
+        \\
+        \\begin
+        ,
+        \\end
+        \\
+        \\    lang: zig esc: none tag: #baz
+        \\    -----------------------------
+        \\
+        \\    abc
+        \\
+        \\end
+    }, &.{
+        .{ .name = "baz", .text = "abc" },
+        .{ .name = "bar", .text = "abcabc" },
+        .{ .name = "foo", .text = "abc" },
+    });
 }
