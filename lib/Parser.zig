@@ -697,39 +697,6 @@ fn parseDelimiter(
     }
 }
 
-pub fn parse(gpa: *Allocator, text: []const u8) !Linker.Object {
-    var p: Parser = .{ .it = .{ .bytes = text } };
-
-    errdefer p.deinit(gpa);
-
-    var code_block = false;
-    while (p.next()) |token| {
-        if (token.tag == .nl and token.len() >= 2) {
-            if (p.eat(.space, @src())) |space| if (space.len == 4 and !code_block) {
-                const header = p.parseHeaderLine() catch |e| switch (e) {
-                    error.@"Missing language specification" => {
-                        code_block = true;
-                        continue;
-                    },
-                    else => |err| return err,
-                };
-
-                try p.parseBody(gpa, header);
-            } else if (space.len < 4) {
-                code_block = false;
-            };
-        }
-    }
-
-    return Linker.Object{
-        .text = text,
-        .program = p.program,
-        .symbols = p.symbols,
-        .adjacent = p.adjacent,
-        .files = p.files,
-    };
-}
-
 test "parse body" {
     const text =
         \\    <<a b c:from(t)|f>>
@@ -773,6 +740,39 @@ test "compile single tag" {
     try testing.expect(p.symbols.contains("a b c"));
     try testing.expect(p.symbols.contains("1 2 3"));
     try testing.expect(p.symbols.contains(". . ."));
+}
+
+pub fn parse(gpa: *Allocator, text: []const u8) !Linker.Object {
+    var p: Parser = .{ .it = .{ .bytes = text } };
+
+    errdefer p.deinit(gpa);
+
+    var code_block = false;
+    while (p.next()) |token| {
+        if (token.tag == .nl and token.len() >= 2) {
+            if (p.eat(.space, @src())) |space| if (space.len == 4 and !code_block) {
+                const header = p.parseHeaderLine() catch |e| switch (e) {
+                    error.@"Missing language specification" => {
+                        code_block = true;
+                        continue;
+                    },
+                    else => |err| return err,
+                };
+
+                try p.parseBody(gpa, header);
+            } else if (space.len < 4) {
+                code_block = false;
+            };
+        }
+    }
+
+    return Linker.Object{
+        .text = text,
+        .program = p.program,
+        .symbols = p.symbols,
+        .adjacent = p.adjacent,
+        .files = p.files,
+    };
 }
 
 const TestCompileResult = struct {
