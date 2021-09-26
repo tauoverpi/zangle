@@ -8,6 +8,7 @@ const Tokenizer = lib.Tokenizer;
 const Linker = lib.Linker;
 const Allocator = std.mem.Allocator;
 const Instruction = lib.Instruction;
+const Location = Tokenizer.Location;
 const Parser = @This();
 
 it: Tokenizer,
@@ -15,6 +16,7 @@ program: Instruction.List = .{},
 symbols: Linker.Object.SymbolMap = .{},
 adjacent: Linker.Object.AdjacentMap = .{},
 files: Linker.Object.FileMap = .{},
+location: Location = .{},
 
 const Token = Tokenizer.Token;
 const log = std.log.scoped(.parser);
@@ -353,6 +355,8 @@ fn parseBody(p: *Parser, gpa: *Allocator, header: Header) !void {
     defer log.debug("end parsing body", .{});
 
     const entry_point = @intCast(u32, p.program.len);
+    const location = p.it.locationFrom(p.location);
+    p.location = location; // avoid RLS
 
     var nl: usize = 0;
     while (p.eat(.space, @src())) |space| {
@@ -424,6 +428,7 @@ fn parseBody(p: *Parser, gpa: *Allocator, header: Header) !void {
                 });
             } else {
                 adj.value_ptr.entry = entry_point;
+                adj.value_ptr.location = location;
             }
 
             adj.value_ptr.exit = @intCast(u32, p.program.len);
@@ -432,7 +437,10 @@ fn parseBody(p: *Parser, gpa: *Allocator, header: Header) !void {
         .file => {
             const file = try p.files.getOrPut(gpa, header.resource.slice(p.it.bytes));
             if (file.found_existing) return error.@"Multiple file outputs with the same name";
-            file.value_ptr.* = entry_point;
+            file.value_ptr.* = .{
+                .entry = entry_point,
+                .location = location,
+            };
         },
     }
 
@@ -569,13 +577,14 @@ test "compile single tag" {
     try testing.expect(p.symbols.contains(". . ."));
 }
 
-pub fn parse(gpa: *Allocator, text: []const u8) !Linker.Object {
+pub fn parse(gpa: *Allocator, name: []const u8, text: []const u8) !Linker.Object {
     var p: Parser = .{ .it = .{ .bytes = text } };
     errdefer p.deinit(gpa);
 
     while (try p.step(gpa)) {}
 
     return Linker.Object{
+        .name = name,
         .text = text,
         .program = p.program,
         .symbols = p.symbols,
@@ -584,8 +593,9 @@ pub fn parse(gpa: *Allocator, text: []const u8) !Linker.Object {
     };
 }
 
-pub fn object(p: *Parser) Linker.Object {
+pub fn object(p: *Parser, name: []const u8) Linker.Object {
     return Linker.Object{
+        .name = name,
         .text = p.it.bytes,
         .program = p.program,
         .symbols = p.symbols,
@@ -802,7 +812,7 @@ fn testCompile(
     text: []const u8,
     result: TestCompileResult,
 ) !void {
-    var obj = try Parser.parse(testing.allocator, text);
+    var obj = try Parser.parse(testing.allocator, "", text);
     defer obj.deinit(testing.allocator);
 
     errdefer for (obj.program.items(.opcode)) |op| {

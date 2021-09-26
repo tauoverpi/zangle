@@ -8,6 +8,7 @@ const Instruction = lib.Instruction;
 const ArrayList = std.ArrayListUnmanaged;
 const Allocator = std.mem.Allocator;
 const StringMap = std.StringArrayHashMapUnmanaged;
+const Tokenizer = lib.Tokenizer;
 const Linker = @This();
 
 objects: Object.List = .{},
@@ -20,6 +21,7 @@ const FileMap = StringMap(Procedure);
 const Procedure = struct {
     entry: u32,
     module: u16,
+    location: Tokenizer.Location,
 };
 
 const log = std.log.scoped(.linker);
@@ -33,6 +35,7 @@ pub fn deinit(l: *Linker, gpa: *Allocator) void {
 }
 
 pub const Object = struct {
+    name: []const u8,
     text: []const u8,
     program: Instruction.List = .{},
     symbols: SymbolMap = .{},
@@ -41,13 +44,19 @@ pub const Object = struct {
 
     pub const List = ArrayList(Object);
     pub const SymbolMap = StringMap(SymbolList);
-    pub const FileMap = StringMap(u32);
+    pub const FileMap = StringMap(File);
     pub const SymbolList = ArrayList(u32);
     pub const AdjacentMap = StringMap(Adjacent);
+
+    pub const File = struct {
+        entry: u32,
+        location: Tokenizer.Location,
+    };
 
     pub const Adjacent = struct {
         entry: u32,
         exit: u32,
+        location: Tokenizer.Location,
     };
 
     pub fn deinit(self: *Object, gpa: *Allocator) void {
@@ -106,7 +115,7 @@ fn mergeAdjacent(l: *Linker) void {
 }
 
 test "merge" {
-    var obj_a = try Parser.parse(testing.allocator,
+    var obj_a = try Parser.parse(testing.allocator, "",
         \\
         \\
         \\    lang: zig esc: none tag: #a
@@ -124,7 +133,7 @@ test "merge" {
         \\end
     );
 
-    var obj_b = try Parser.parse(testing.allocator,
+    var obj_b = try Parser.parse(testing.allocator, "",
         \\
         \\
         \\    lang: zig esc: none tag: #a
@@ -135,7 +144,7 @@ test "merge" {
         \\end
     );
 
-    var obj_c = try Parser.parse(testing.allocator,
+    var obj_c = try Parser.parse(testing.allocator, "",
         \\
         \\
         \\    lang: zig esc: none tag: #b
@@ -185,12 +194,17 @@ fn buildProcedureTable(l: *Linker, gpa: *Allocator) !void {
         for (obj.adjacent.keys()) |key, i| {
             const entry = try l.procedures.getOrPut(gpa, key);
             if (!entry.found_existing) {
-                const entry_point = obj.adjacent.values()[i].entry;
-                log.debug("registering new procedure '{s}' address {x:0>8} module {d}", .{ key, entry_point, module + 1 });
+                const adjacent = obj.adjacent.values()[i];
+                log.debug("registering new procedure '{s}' address {x:0>8} module {d}", .{
+                    key,
+                    adjacent.entry,
+                    module + 1,
+                });
 
                 entry.value_ptr.* = .{
                     .module = @intCast(u16, module) + 1,
-                    .entry = @intCast(u32, entry_point),
+                    .entry = @intCast(u32, adjacent.entry),
+                    .location = adjacent.location,
                 };
             }
         }
@@ -218,9 +232,11 @@ fn buildFileTable(l: *Linker, gpa: *Allocator) !void {
     for (l.objects.items) |obj, module| {
         for (obj.files.keys()) |key, i| {
             const file = try l.files.getOrPut(gpa, key);
+            const record = obj.files.values()[i];
             if (file.found_existing) return error.@"Multiple files with the same name";
             file.value_ptr.module = @intCast(u16, module) + 1;
-            file.value_ptr.entry = obj.files.values()[i];
+            file.value_ptr.entry = record.entry;
+            file.value_ptr.location = record.location;
         }
     }
 }
@@ -249,7 +265,7 @@ pub fn link(l: *Linker, gpa: *Allocator) !void {
 }
 
 test "call" {
-    var obj = try Parser.parse(testing.allocator,
+    var obj = try Parser.parse(testing.allocator, "",
         \\
         \\
         \\    lang: zig esc: none tag: #a

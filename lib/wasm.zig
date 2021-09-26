@@ -20,7 +20,7 @@ pub export fn add(text: [*]const u8, len: usize) i32 {
 }
 
 fn addInternal(text: []const u8) !i32 {
-    var obj = try Parser.parse(gpa, text);
+    var obj = try Parser.parse(gpa, "", text);
     errdefer obj.deinit(gpa);
     try vm.linker.objects.append(gpa, obj);
     return @intCast(i32, vm.linker.objects.items.len - 1);
@@ -34,7 +34,7 @@ pub export fn update(id: u32, text: [*]const u8, len: usize) i32 {
 
 fn updateInternal(id: u32, text: []const u8) !void {
     if (id >= vm.linker.objects.items.len) return error.@"Id out of range";
-    const obj = try Parser.parse(gpa, text);
+    const obj = try Parser.parse(gpa, "", text);
     gpa.free(vm.linker.objects.items[id].text);
     vm.linker.objects.items[id].deinit(gpa);
     vm.linker.objects.items[id] = obj;

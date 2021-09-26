@@ -252,7 +252,7 @@ fn testTangle(source: []const []const u8, output: []const TestTangleOutput) !voi
     defer if (owned) l.deinit(testing.allocator);
 
     for (source) |src| {
-        const obj = try Parser.parse(testing.allocator, src);
+        const obj = try Parser.parse(testing.allocator, "", src);
         try l.objects.append(testing.allocator, obj);
     }
 

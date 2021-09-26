@@ -83,6 +83,7 @@ $ zangle graph README.md | dot -Tpng -o grpah.png
     const Instruction = lib.Instruction;
     const Interpreter = lib.Interpreter;
     const GraphContext = @import("GraphContext.zig");
+    const FindContext = @import("FindContext.zig");
 
     pub const log_level = .info;
 
@@ -178,6 +179,18 @@ $ zangle graph README.md | dot -Tpng -o grpah.png
                 try context.stream.flush();
             },
 
+            .find => for (options.calls) |call| switch (call) {
+                .file => unreachable, // not an option for find
+                .tag => |tag| {
+                    log.debug("finding paths to tag {s}", .{tag});
+                    for (vm.linker.files.keys()) |file| {
+                        var context = FindContext.init(gpa, file, tag, stdout);
+                        try vm.callFile(gpa, file, *FindContext, &context);
+                        try context.stream.flush();
+                    }
+                },
+            },
+
             .graph => {
                 var context = GraphContext.init(gpa, stdout);
 
@@ -229,6 +242,7 @@ $ zangle graph README.md | dot -Tpng -o grpah.png
         ls,
         call,
         graph,
+        find,
 
         pub const map = std.ComptimeStringMap(Command, .{
             .{ "help", .help },
@@ -236,6 +250,7 @@ $ zangle graph README.md | dot -Tpng -o grpah.png
             .{ "ls", .ls },
             .{ "call", .call },
             .{ "graph", .graph },
+            .{ "find", .find },
         });
     };
 
@@ -288,6 +303,12 @@ $ zangle graph README.md | dot -Tpng -o grpah.png
         \\  --tag=[tagname]    Render tag block to stdout
     ;
 
+    const find_help =
+        \\Usage: zangle find [options] [files]
+        \\
+        \\  --tag=[tagname]    Find the location of the given tag in the literate document and output files
+    ;
+
     const graph_help =
         \\Usage: zangle graph [files]
         \\
@@ -317,6 +338,7 @@ $ zangle graph README.md | dot -Tpng -o grpah.png
             .ls => log.info(ls_help, .{}),
             .call => log.info(call_help, .{}),
             .graph => log.info(graph_help, .{}),
+            .find => log.info(find_help, .{}),
         }
     }
 
@@ -380,6 +402,11 @@ $ zangle graph README.md | dot -Tpng -o grpah.png
                         else => return error.@"Unknown command-line flag",
                     },
 
+                    .find => switch (flag) {
+                        .tag => try calls.append(.{ .tag = arg[split..] }),
+                        else => return error.@"Unknown command-line flag",
+                    },
+
                     .graph => switch (flag) {
                         .graph_border_colour => options.graph_border_colour = try parseColour(arg[split..]),
                         .graph_background_colour => options.graph_background_colour = try parseColour(arg[split..]),
@@ -424,7 +451,7 @@ $ zangle graph README.md | dot -Tpng -o grpah.png
                     os.exit(1);
                 }
 
-                const object = p.object();
+                const object = p.object(arg);
 
                 objects.append(gpa, object) catch return error.@"Exhausted memory";
             }
@@ -610,6 +637,7 @@ return stack. This instruction is primarily used to thread blocks with the
 same tag together across files in the order in which they occur within the
 literate source. If the target module is 0 then it's interpreted as being
 local to the current module.
+
 
     lang: zig esc: none tag: #instruction list
     ------------------------------------------
@@ -937,6 +965,93 @@ Rendering is handled by passing a context in which to run the program.
         }
     };
 
+### Find context
+
+    lang: zig esc: none file: src/FindContext.zig
+    ---------------------------------------------
+
+    const std = @import("std");
+    const lib = @import("lib");
+    const io = std.io;
+    const fs = std.fs;
+    const mem = std.mem;
+
+    const ArrayList = std.ArrayListUnmanaged;
+    const Allocator = std.mem.Allocator;
+    const Interpreter = lib.Interpreter;
+    const FindContext = @This();
+
+    stream: Stream,
+    line: u32 = 1,
+    column: u32 = 1,
+    stack: Stack = .{},
+    filename: []const u8,
+    tag: []const u8,
+    gpa: *Allocator,
+
+    const log = std.log.scoped(.find_context);
+
+    pub const Stream = io.BufferedWriter(1024, std.fs.File.Writer);
+
+    pub const Stack = ArrayList(Location);
+
+    pub const Location = struct {
+        line: u32,
+        column: u32,
+    };
+
+    pub fn init(gpa: *Allocator, file: []const u8, tag: []const u8, writer: fs.File.Writer) FindContext {
+        return .{
+            .stream = .{ .unbuffered_writer = writer },
+            .filename = file,
+            .tag = tag,
+            .gpa = gpa,
+        };
+    }
+
+    pub fn write(self: *FindContext, vm: *Interpreter, text: []const u8, start: u32, nl: u16) !void {
+        _ = vm;
+        _ = start;
+        if (nl == 0) {
+            self.column += @intCast(u32, text.len);
+        } else {
+            self.line += @intCast(u32, nl);
+            self.column = @intCast(u32, text.len + 1);
+        }
+    }
+
+    pub fn call(self: *FindContext, vm: *Interpreter) !void {
+        _ = vm;
+
+        try self.stack.append(self.gpa, .{
+            .line = self.line,
+            .column = self.column,
+        });
+    }
+
+    pub fn ret(self: *FindContext, vm: *Interpreter, name: []const u8) !void {
+        _ = name;
+
+        const writer = self.stream.writer();
+        const location = self.stack.pop();
+        const procedure = vm.linker.procedures.get(name).?;
+        const obj = vm.linker.objects.items[procedure.module - 1];
+
+        if (mem.eql(u8, self.tag, name)) try writer.print(
+            \\{s}: line {d} column {d} '{s}' -> line {d} column {d} '{s}' ({d} lines)
+            \\
+        , .{
+            self.tag,
+            procedure.location.line,
+            procedure.location.column,
+            obj.name,
+            location.line,
+            location.column,
+            self.filename,
+            self.line - location.line,
+        });
+    }
+
 ### Graph context
 
     lang: zig esc: none file: src/GraphContext.zig
@@ -1193,6 +1308,7 @@ Rendering is handled by passing a context in which to run the program.
     const ArrayList = std.ArrayListUnmanaged;
     const Allocator = std.mem.Allocator;
     const StringMap = std.StringArrayHashMapUnmanaged;
+    const Tokenizer = lib.Tokenizer;
     const Linker = @This();
 
     objects: Object.List = .{},
@@ -1205,6 +1321,7 @@ Rendering is handled by passing a context in which to run the program.
     const Procedure = struct {
         entry: u32,
         module: u16,
+        location: Tokenizer.Location,
     };
 
     const log = std.log.scoped(.linker);
@@ -1218,6 +1335,7 @@ Rendering is handled by passing a context in which to run the program.
     }
 
     pub const Object = struct {
+        name: []const u8,
         text: []const u8,
         program: Instruction.List = .{},
         symbols: SymbolMap = .{},
@@ -1226,13 +1344,19 @@ Rendering is handled by passing a context in which to run the program.
 
         pub const List = ArrayList(Object);
         pub const SymbolMap = StringMap(SymbolList);
-        pub const FileMap = StringMap(u32);
+        pub const FileMap = StringMap(File);
         pub const SymbolList = ArrayList(u32);
         pub const AdjacentMap = StringMap(Adjacent);
+
+        pub const File = struct {
+            entry: u32,
+            location: Tokenizer.Location,
+        };
 
         pub const Adjacent = struct {
             entry: u32,
             exit: u32,
+            location: Tokenizer.Location,
         };
 
         pub fn deinit(self: *Object, gpa: *Allocator) void {
@@ -1308,7 +1432,7 @@ TODO: short-circuit on non local module end
     }
 
     test "merge" {
-        var obj_a = try Parser.parse(testing.allocator,
+        var obj_a = try Parser.parse(testing.allocator, "",
             \\
             \\
             \\    lang: zig esc: none tag: #a
@@ -1326,7 +1450,7 @@ TODO: short-circuit on non local module end
             \\end
         );
 
-        var obj_b = try Parser.parse(testing.allocator,
+        var obj_b = try Parser.parse(testing.allocator, "",
             \\
             \\
             \\    lang: zig esc: none tag: #a
@@ -1337,7 +1461,7 @@ TODO: short-circuit on non local module end
             \\end
         );
 
-        var obj_c = try Parser.parse(testing.allocator,
+        var obj_c = try Parser.parse(testing.allocator, "",
             \\
             \\
             \\    lang: zig esc: none tag: #b
@@ -1392,12 +1516,17 @@ TODO: short-circuit on non local module end
             for (obj.adjacent.keys()) |key, i| {
                 const entry = try l.procedures.getOrPut(gpa, key);
                 if (!entry.found_existing) {
-                    const entry_point = obj.adjacent.values()[i].entry;
-                    log.debug("registering new procedure '{s}' address {x:0>8} module {d}", .{ key, entry_point, module + 1 });
+                    const adjacent = obj.adjacent.values()[i];
+                    log.debug("registering new procedure '{s}' address {x:0>8} module {d}", .{
+                        key,
+                        adjacent.entry,
+                        module + 1,
+                    });
 
                     entry.value_ptr.* = .{
                         .module = @intCast(u16, module) + 1,
-                        .entry = @intCast(u32, entry_point),
+                        .entry = @intCast(u32, adjacent.entry),
+                        .location = adjacent.location,
                     };
                 }
             }
@@ -1435,9 +1564,11 @@ TODO: short-circuit on non local module end
         for (l.objects.items) |obj, module| {
             for (obj.files.keys()) |key, i| {
                 const file = try l.files.getOrPut(gpa, key);
+                const record = obj.files.values()[i];
                 if (file.found_existing) return error.@"Multiple files with the same name";
                 file.value_ptr.module = @intCast(u16, module) + 1;
-                file.value_ptr.entry = obj.files.values()[i];
+                file.value_ptr.entry = record.entry;
+                file.value_ptr.location = record.location;
             }
         }
     }
@@ -1471,7 +1602,7 @@ TODO: short-circuit on non local module end
     }
 
     test "call" {
-        var obj = try Parser.parse(testing.allocator,
+        var obj = try Parser.parse(testing.allocator, "",
             \\
             \\
             \\    lang: zig esc: none tag: #a
@@ -1526,6 +1657,7 @@ TODO: short-circuit on non local module end
     const Linker = lib.Linker;
     const Allocator = std.mem.Allocator;
     const Instruction = lib.Instruction;
+    const Location = Tokenizer.Location;
     const Parser = @This();
 
     it: Tokenizer,
@@ -1533,6 +1665,7 @@ TODO: short-circuit on non local module end
     symbols: Linker.Object.SymbolMap = .{},
     adjacent: Linker.Object.AdjacentMap = .{},
     files: Linker.Object.FileMap = .{},
+    location: Location = .{},
 
     const Token = Tokenizer.Token;
     const log = std.log.scoped(.parser);
@@ -2015,6 +2148,8 @@ TODO: link tags to their definition
         defer log.debug("end parsing body", .{});
 
         const entry_point = @intCast(u32, p.program.len);
+        const location = p.it.locationFrom(p.location);
+        p.location = location; // avoid RLS
 
         var nl: usize = 0;
         while (p.eat(.space, @src())) |space| {
@@ -2086,6 +2221,7 @@ TODO: link tags to their definition
                     });
                 } else {
                     adj.value_ptr.entry = entry_point;
+                    adj.value_ptr.location = location;
                 }
 
                 adj.value_ptr.exit = @intCast(u32, p.program.len);
@@ -2094,7 +2230,10 @@ TODO: link tags to their definition
             .file => {
                 const file = try p.files.getOrPut(gpa, header.resource.slice(p.it.bytes));
                 if (file.found_existing) return error.@"Multiple file outputs with the same name";
-                file.value_ptr.* = entry_point;
+                file.value_ptr.* = .{
+                    .entry = entry_point,
+                    .location = location,
+                };
             },
         }
 
@@ -2251,13 +2390,14 @@ Pipes pass code blocks through external programs.
         try testing.expect(p.symbols.contains(". . ."));
     }
 
-    pub fn parse(gpa: *Allocator, text: []const u8) !Linker.Object {
+    pub fn parse(gpa: *Allocator, name: []const u8, text: []const u8) !Linker.Object {
         var p: Parser = .{ .it = .{ .bytes = text } };
         errdefer p.deinit(gpa);
 
         while (try p.step(gpa)) {}
 
         return Linker.Object{
+            .name = name,
             .text = text,
             .program = p.program,
             .symbols = p.symbols,
@@ -2266,8 +2406,9 @@ Pipes pass code blocks through external programs.
         };
     }
 
-    pub fn object(p: *Parser) Linker.Object {
+    pub fn object(p: *Parser, name: []const u8) Linker.Object {
         return Linker.Object{
+            .name = name,
             .text = p.it.bytes,
             .program = p.program,
             .symbols = p.symbols,
@@ -2490,7 +2631,7 @@ Pipes pass code blocks through external programs.
         text: []const u8,
         result: TestCompileResult,
     ) !void {
-        var obj = try Parser.parse(testing.allocator, text);
+        var obj = try Parser.parse(testing.allocator, "", text);
         defer obj.deinit(testing.allocator);
 
         errdefer for (obj.program.items(.opcode)) |op| {
@@ -2640,7 +2781,7 @@ Pipes pass code blocks through external programs.
         defer if (owned) l.deinit(testing.allocator);
 
         for (source) |src| {
-            const obj = try Parser.parse(testing.allocator, src);
+            const obj = try Parser.parse(testing.allocator, "", src);
             try l.objects.append(testing.allocator, obj);
         }
 
@@ -2869,7 +3010,7 @@ Pipes pass code blocks through external programs.
     }
 
     fn addInternal(text: []const u8) !i32 {
-        var obj = try Parser.parse(gpa, text);
+        var obj = try Parser.parse(gpa, "", text);
         errdefer obj.deinit(gpa);
         try vm.linker.objects.append(gpa, obj);
         return @intCast(i32, vm.linker.objects.items.len - 1);
@@ -2883,7 +3024,7 @@ Pipes pass code blocks through external programs.
 
     fn updateInternal(id: u32, text: []const u8) !void {
         if (id >= vm.linker.objects.items.len) return error.@"Id out of range";
-        const obj = try Parser.parse(gpa, text);
+        const obj = try Parser.parse(gpa, "", text);
         gpa.free(vm.linker.objects.items[id].text);
         vm.linker.objects.items[id].deinit(gpa);
         vm.linker.objects.items[id] = obj;

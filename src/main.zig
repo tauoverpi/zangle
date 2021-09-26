@@ -20,6 +20,7 @@ const Linker = lib.Linker;
 const Instruction = lib.Instruction;
 const Interpreter = lib.Interpreter;
 const GraphContext = @import("GraphContext.zig");
+const FindContext = @import("FindContext.zig");
 
 pub const log_level = .info;
 
@@ -54,6 +55,7 @@ const Command = enum {
     ls,
     call,
     graph,
+    find,
 
     pub const map = std.ComptimeStringMap(Command, .{
         .{ "help", .help },
@@ -61,6 +63,7 @@ const Command = enum {
         .{ "ls", .ls },
         .{ "call", .call },
         .{ "graph", .graph },
+        .{ "find", .find },
     });
 };
 
@@ -113,6 +116,12 @@ const call_help =
     \\  --tag=[tagname]    Render tag block to stdout
 ;
 
+const find_help =
+    \\Usage: zangle find [options] [files]
+    \\
+    \\  --tag=[tagname]    Find the location of the given tag in the literate document and output files
+;
+
 const graph_help =
     \\Usage: zangle graph [files]
     \\
@@ -142,6 +151,7 @@ fn help(com: ?Command, name: ?[]const u8) void {
         .ls => log.info(ls_help, .{}),
         .call => log.info(call_help, .{}),
         .graph => log.info(graph_help, .{}),
+        .find => log.info(find_help, .{}),
     }
 }
 
@@ -205,6 +215,11 @@ fn parseCli(gpa: *Allocator, objects: *Linker.Object.List) !?Options {
                     else => return error.@"Unknown command-line flag",
                 },
 
+                .find => switch (flag) {
+                    .tag => try calls.append(.{ .tag = arg[split..] }),
+                    else => return error.@"Unknown command-line flag",
+                },
+
                 .graph => switch (flag) {
                     .graph_border_colour => options.graph_border_colour = try parseColour(arg[split..]),
                     .graph_background_colour => options.graph_background_colour = try parseColour(arg[split..]),
@@ -249,7 +264,7 @@ fn parseCli(gpa: *Allocator, objects: *Linker.Object.List) !?Options {
                 os.exit(1);
             }
 
-            const object = p.object();
+            const object = p.object(arg);
 
             objects.append(gpa, object) catch return error.@"Exhausted memory";
         }
@@ -355,6 +370,18 @@ pub fn run() !void {
             };
 
             try context.stream.flush();
+        },
+
+        .find => for (options.calls) |call| switch (call) {
+            .file => unreachable, // not an option for find
+            .tag => |tag| {
+                log.debug("finding paths to tag {s}", .{tag});
+                for (vm.linker.files.keys()) |file| {
+                    var context = FindContext.init(gpa, file, tag, stdout);
+                    try vm.callFile(gpa, file, *FindContext, &context);
+                    try context.stream.flush();
+                }
+            },
         },
 
         .graph => {
