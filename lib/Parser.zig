@@ -323,21 +323,23 @@ fn parseHeaderLine(p: *Parser) ParseHeaderError!Header {
         .start = @intCast(u32, start),
         .len = @intCast(u16, nl.start - start),
     };
-
     const resource = header.resource.slice(p.it.bytes);
 
     if (header.type == .file) for (&[_][]const u8{ "../", "..\\" }) |invalid| {
-        if (mem.indexOf(u8, resource, invalid) != null) {
-            return error.@"Invalid file path, parent directory references '../' and '..\\' are not allowed within output paths";
+        if (mem.indexOf(u8, resource, invalid)) |index| {
+            if (index == 0 or resource[index - 1] != '.') {
+                return error.@"Invalid file path, parent directory references '../' and '..\\' are not allowed within output paths";
+            }
         }
     };
 
     if (header.type == .file) for (&[_][]const u8{ "./", ".\\" }) |invalid| {
-        if (mem.indexOf(u8, resource, invalid) != null) {
-            return error.@"Invalid file path, current directory references './' and '.\\' are not allowed within output paths";
+        if (mem.indexOf(u8, resource, invalid)) |index| {
+            if (index == 0 or resource[index - 1] != '.') {
+                return error.@"Invalid file path, current directory references './' and '.\\' are not allowed within output paths";
+            }
         }
     };
-
     if (header.resource.len == 0) {
         switch (header.type) {
             .file => return error.@"Missing file name",
@@ -755,6 +757,11 @@ test "parse header line" {
     try testing.expectError(
         error.@"Invalid file path, current directory references './' and '.\\' are not allowed within output paths",
         testParseHeader("lang: zig esc: {{}} file: ./foo\n", common),
+    );
+
+    try testing.expectError(
+        error.@"Expected the dividing line to be indented by 4 spaces",
+        testParseHeader("lang: zig esc: {{}} file: .../foo\n", common),
     );
 
     try testing.expectError(
