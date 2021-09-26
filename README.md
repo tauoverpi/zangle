@@ -2000,6 +2000,8 @@ start at the end. This allows the user to click through to the next block.
         @"Invalid delimiter, expected one of '<', '{', '[', '('",
         @"Invalid delimiter, expected one of '>', '}', ']', ')'",
         @"Invalid option given, expected 'tag:' or 'file:'",
+        @"Invalid file path, parent directory references '../' and '..\\' are not allowed within output paths",
+        @"Invalid file path, current directory references './' and '.\\' are not allowed within output paths",
     };
 
     fn parseHeaderLine(p: *Parser) ParseHeaderError!Header {
@@ -2102,6 +2104,39 @@ start at the end. This allows the user to click through to the next block.
             .start = @intCast(u32, start),
             .len = @intCast(u16, nl.start - start),
         };
+
+File paths may specify `../` and `./` which are valid paths but the former
+allows reaching outside of the project root while the other is confusing as
+it always references the current directory. Since zangle shouldn't be able
+to reach outside of the directory unless explicit permission is given via a
+command-line flag and the other makes little sense, both options are treated
+as parser errors.
+
+    lang: zig esc: none tag: #zangle parser
+    ---------------------------------------
+
+        const resource = header.resource.slice(p.it.bytes);
+
+        if (header.type == .file) for (&[_][]const u8{ "../", "..\\" }) |invalid| {
+            if (mem.indexOf(u8, resource, invalid)) |index| {
+                if (index == 0 or resource[index - 1] != '.') {
+                    return error.@"Invalid file path, parent directory references '../' and '..\\' are not allowed within output paths";
+                }
+            }
+        };
+
+        if (header.type == .file) for (&[_][]const u8{ "./", ".\\" }) |invalid| {
+            if (mem.indexOf(u8, resource, invalid)) |index| {
+                if (index == 0 or resource[index - 1] != '.') {
+                    return error.@"Invalid file path, current directory references './' and '.\\' are not allowed within output paths";
+                }
+            }
+        };
+
+<!-- -->
+
+    lang: zig esc: none tag: #zangle parser
+    ---------------------------------------
 
         if (header.resource.len == 0) {
             switch (header.type) {
@@ -2544,6 +2579,21 @@ Pipes pass code blocks through external programs.
         try testing.expectError(
             error.@"Missing file name",
             testParseHeader("lang: zig esc: {{}} file: \n", common),
+        );
+
+        try testing.expectError(
+            error.@"Invalid file path, parent directory references '../' and '..\\' are not allowed within output paths",
+            testParseHeader("lang: zig esc: {{}} file: ../../../../etc/foo\n", common),
+        );
+
+        try testing.expectError(
+            error.@"Invalid file path, current directory references './' and '.\\' are not allowed within output paths",
+            testParseHeader("lang: zig esc: {{}} file: ./foo\n", common),
+        );
+
+        try testing.expectError(
+            error.@"Expected the dividing line to be indented by 4 spaces",
+            testParseHeader("lang: zig esc: {{}} file: .../foo\n", common),
         );
 
         try testing.expectError(
