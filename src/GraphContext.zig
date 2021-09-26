@@ -1,4 +1,5 @@
 const std = @import("std");
+const lib = @import("lib");
 const io = std.io;
 const fs = std.fs;
 const assert = std.debug.assert;
@@ -6,6 +7,7 @@ const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayListUnmanaged;
 const HashMap = std.AutoHashMapUnmanaged;
+const Interpreter = lib.Interpreter;
 const GraphContext = @This();
 
 stream: Stream,
@@ -70,17 +72,13 @@ pub fn end(self: *GraphContext) !void {
     try self.stream.writer().writeAll("}\n");
 }
 
-pub fn call(self: *GraphContext, ip: u32, module: u16, indent: u16) !void {
-    _ = ip;
-    _ = module;
-    _ = indent;
+pub fn call(self: *GraphContext, vm: *Interpreter) !void {
+    _ = vm;
     try self.stack.append(self.gpa, .{});
 }
 
-pub fn ret(self: *GraphContext, ip: u32, module: u16, indent: u16, name: []const u8) !void {
-    _ = ip;
-    _ = module;
-    _ = indent;
+pub fn ret(self: *GraphContext, vm: *Interpreter, name: []const u8) !void {
+    _ = vm;
 
     try self.render(name);
 
@@ -90,7 +88,8 @@ pub fn ret(self: *GraphContext, ip: u32, module: u16, indent: u16, name: []const
     try self.stack.items[self.stack.items.len - 1].list.append(self.gpa, name);
 }
 
-pub fn terminate(self: *GraphContext, name: []const u8) !void {
+pub fn terminate(self: *GraphContext, vm: *Interpreter, name: []const u8) !void {
+    _ = vm;
     try self.render(name);
 
     self.stack.items[0].list.clearRetainingCapacity();
