@@ -219,6 +219,8 @@ const ParseHeaderError = error{
     @"Invalid delimiter, expected one of '<', '{', '[', '('",
     @"Invalid delimiter, expected one of '>', '}', ']', ')'",
     @"Invalid option given, expected 'tag:' or 'file:'",
+    @"Invalid file path, parent directory references '../' and '..\\' are not allowed within output paths",
+    @"Invalid file path, current directory references './' and '.\\' are not allowed within output paths",
 };
 
 fn parseHeaderLine(p: *Parser) ParseHeaderError!Header {
@@ -320,6 +322,20 @@ fn parseHeaderLine(p: *Parser) ParseHeaderError!Header {
     header.resource = .{
         .start = @intCast(u32, start),
         .len = @intCast(u16, nl.start - start),
+    };
+
+    const resource = header.resource.slice(p.it.bytes);
+
+    if (header.type == .file) for (&[_][]const u8{ "../", "..\\" }) |invalid| {
+        if (mem.indexOf(u8, resource, invalid) != null) {
+            return error.@"Invalid file path, parent directory references '../' and '..\\' are not allowed within output paths";
+        }
+    };
+
+    if (header.type == .file) for (&[_][]const u8{ "./", ".\\" }) |invalid| {
+        if (mem.indexOf(u8, resource, invalid) != null) {
+            return error.@"Invalid file path, current directory references './' and '.\\' are not allowed within output paths";
+        }
     };
 
     if (header.resource.len == 0) {
@@ -729,6 +745,16 @@ test "parse header line" {
     try testing.expectError(
         error.@"Missing file name",
         testParseHeader("lang: zig esc: {{}} file: \n", common),
+    );
+
+    try testing.expectError(
+        error.@"Invalid file path, parent directory references '../' and '..\\' are not allowed within output paths",
+        testParseHeader("lang: zig esc: {{}} file: ../../../../etc/foo\n", common),
+    );
+
+    try testing.expectError(
+        error.@"Invalid file path, current directory references './' and '.\\' are not allowed within output paths",
+        testParseHeader("lang: zig esc: {{}} file: ./foo\n", common),
     );
 
     try testing.expectError(
