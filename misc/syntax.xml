@@ -6,6 +6,7 @@
         <item>align</item>
         <item>and</item>
         <item>anyerror</item>
+        <item>anytype</item>
         <item>asm</item>
         <item>async</item>
         <item>await</item>
@@ -26,7 +27,6 @@
         <item>for</item>
         <item>if</item>
         <item>inline</item>
-        <item>nakedcc</item>
         <item>noalias</item>
         <item>or</item>
         <item>orelse</item>
@@ -35,7 +35,7 @@
         <item>resume</item>
         <item>return</item>
         <item>section</item>
-        <item>stdcallcc</item>
+        <item>callconv</item>
         <item>struct</item>
         <item>suspend</item>
         <item>switch</item>
@@ -124,10 +124,8 @@
             <DetectChar char="{" attribute="Symbol" context="#stay" beginRegion="Brace"/>
             <DetectChar char="}" attribute="Symbol" context="#stay" endRegion="Brace"/>
             <DetectChar char="&quot;" attribute="String" context="String" />
-            <Detect2Chars char="c" char1="&quot;" attribute="String" context="String"/>
             <Detect2Chars char="@" char1="&quot;" attribute="String" context="String"/>
             <Detect2Chars char="\" char1="\" attribute="String" context="Multiline String"/>
-            <StringDetect String="c\\" attribute="String" context="Multiline String"/>
             <RegExpr String="\b[_a-zA-Z][_a-zA-Z0-9]*\b" attribute="Normal Text" context="#stay"/>
             <RegExpr String="@[_a-zA-Z][_a-zA-Z0-9]*\b" attribute="Builtin Function" context="#stay"/>
         </context>
