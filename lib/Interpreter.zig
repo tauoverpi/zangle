@@ -95,7 +95,7 @@ fn execJmp(vm: *Interpreter, comptime T: type, data: Instruction.Data.Jmp, eval:
     vm.ip = data.address;
 
     if (@hasDecl(Child(T), "jmp")) try eval.jmp(vm, data.address);
-    if (@hasDecl(Child(T), "write")) try eval.write(vm, "\n", 0, 0);
+    if (@hasDecl(Child(T), "write")) try eval.write(vm, "\n", 0);
 
     log.debug("[mod {d} ip {x:0>8}] jmp(mod {d}, address {x:0>8})", .{
         mod,
@@ -169,7 +169,6 @@ fn execWrite(
     if (@hasDecl(Child(T), "write")) try eval.write(
         vm,
         text[data.start .. data.start + data.len],
-        data.start,
         data.nl,
     );
 
@@ -190,8 +189,7 @@ const Test = struct {
 
     pub const Stream = std.io.FixedBufferStream([]u8);
 
-    pub fn write(self: *Test, vm: *Interpreter, text: []const u8, index: u32, nl: u16) !void {
-        _ = index;
+    pub fn write(self: *Test, vm: *Interpreter, text: []const u8, nl: u16) !void {
         _ = vm;
         const writer = self.stream.writer();
         try writer.writeAll(text);

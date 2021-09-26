@@ -37,9 +37,8 @@ pub fn init(gpa: *Allocator, file: []const u8, tag: []const u8, writer: fs.File.
     };
 }
 
-pub fn write(self: *FindContext, vm: *Interpreter, text: []const u8, start: u32, nl: u16) !void {
+pub fn write(self: *FindContext, vm: *Interpreter, text: []const u8, nl: u16) !void {
     _ = vm;
-    _ = start;
     if (nl == 0) {
         self.column += @intCast(u32, text.len);
     } else {

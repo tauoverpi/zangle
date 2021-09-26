@@ -295,9 +295,8 @@ const FileContext = struct {
         return .{ .stream = .{ .unbuffered_writer = writer } };
     }
 
-    pub fn write(self: *FileContext, vm: *Interpreter, text: []const u8, index: u32, nl: u16) !void {
+    pub fn write(self: *FileContext, vm: *Interpreter, text: []const u8, nl: u16) !void {
         _ = vm;
-        _ = index;
         const writer = self.stream.writer();
         try writer.writeAll(text);
         try writer.writeByteNTimes('\n', nl);

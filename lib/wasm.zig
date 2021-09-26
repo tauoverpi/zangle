@@ -57,8 +57,7 @@ pub export fn reset() void {
 }
 
 const Render = struct {
-    pub fn write(_: Render, v: *Interpreter, text: []const u8, index: u32, nl: u16) !void {
-        _ = index;
+    pub fn write(_: Render, v: *Interpreter, text: []const u8, nl: u16) !void {
         _ = v;
         const writer = output.writer();
         try writer.writeAll(text);

@@ -684,7 +684,7 @@ local to the current module.
         vm.ip = data.address;
 
         if (@hasDecl(Child(T), "jmp")) try eval.jmp(vm, data.address);
-        if (@hasDecl(Child(T), "write")) try eval.write(vm, "\n", 0, 0);
+        if (@hasDecl(Child(T), "write")) try eval.write(vm, "\n", 0);
 
         log.debug("[mod {d} ip {x:0>8}] jmp(mod {d}, address {x:0>8})", .{
             mod,
@@ -887,7 +887,6 @@ A trail of newline characters is emitted after the text as specified in the
         if (@hasDecl(Child(T), "write")) try eval.write(
             vm,
             text[data.start .. data.start + data.len],
-            data.start,
             data.nl,
         );
 
@@ -918,8 +917,7 @@ Rendering is handled by passing a context in which to run the program.
 
         pub const Stream = std.io.FixedBufferStream([]u8);
 
-        pub fn write(self: *Test, vm: *Interpreter, text: []const u8, index: u32, nl: u16) !void {
-            _ = index;
+        pub fn write(self: *Test, vm: *Interpreter, text: []const u8, nl: u16) !void {
             _ = vm;
             const writer = self.stream.writer();
             try writer.writeAll(text);
@@ -951,9 +949,8 @@ Rendering is handled by passing a context in which to run the program.
             return .{ .stream = .{ .unbuffered_writer = writer } };
         }
 
-        pub fn write(self: *FileContext, vm: *Interpreter, text: []const u8, index: u32, nl: u16) !void {
+        pub fn write(self: *FileContext, vm: *Interpreter, text: []const u8, nl: u16) !void {
             _ = vm;
-            _ = index;
             const writer = self.stream.writer();
             try writer.writeAll(text);
             try writer.writeByteNTimes('\n', nl);
@@ -1009,9 +1006,8 @@ Rendering is handled by passing a context in which to run the program.
         };
     }
 
-    pub fn write(self: *FindContext, vm: *Interpreter, text: []const u8, start: u32, nl: u16) !void {
+    pub fn write(self: *FindContext, vm: *Interpreter, text: []const u8, nl: u16) !void {
         _ = vm;
-        _ = start;
         if (nl == 0) {
             self.column += @intCast(u32, text.len);
         } else {
@@ -3047,8 +3043,7 @@ Pipes pass code blocks through external programs.
     }
 
     const Render = struct {
-        pub fn write(_: Render, v: *Interpreter, text: []const u8, index: u32, nl: u16) !void {
-            _ = index;
+        pub fn write(_: Render, v: *Interpreter, text: []const u8, nl: u16) !void {
             _ = v;
             const writer = output.writer();
             try writer.writeAll(text);
