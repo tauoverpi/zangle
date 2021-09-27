@@ -33,6 +33,7 @@ const Options = struct {
     graph_text_colour: u24 = 0x000000,
     graph_background_colour: u24 = 0xffffff,
     graph_border_colour: u24 = 0x92abc9,
+    graph_inherit_line_colour: bool = false,
     graph_colours: []const u24 = &.{
         0xdf4d77,
         0x2288ed,
@@ -75,6 +76,7 @@ const Flag = enum {
     list_tags,
     list_files,
     graph_border_colour,
+    graph_inherit_line_colour,
     graph_colours,
     graph_background_colour,
     graph_text_colour,
@@ -91,6 +93,7 @@ const Flag = enum {
         .{ "--graph-colours=", .graph_colours },
         .{ "--graph-background-colour=", .graph_background_colour },
         .{ "--graph-text-colour=", .graph_text_colour },
+        .{ "--graph-inherit-line-colour", .graph_inherit_line_colour },
         .{ "--", .@"--" },
     });
 };
@@ -224,6 +227,7 @@ fn parseCli(gpa: *Allocator, objects: *Linker.Object.List) !?Options {
                     .graph_border_colour => options.graph_border_colour = try parseColour(arg[split..]),
                     .graph_background_colour => options.graph_background_colour = try parseColour(arg[split..]),
                     .graph_text_colour => options.graph_text_colour = try parseColour(arg[split..]),
+                    .graph_inherit_line_colour => options.graph_inherit_line_colour = true,
 
                     .graph_colours => {
                         var it = mem.tokenize(u8, arg[split..], ",");
@@ -391,6 +395,7 @@ pub fn run() !void {
                 .background = options.graph_background_colour,
                 .text = options.graph_text_colour,
                 .colours = options.graph_colours,
+                .inherit = options.graph_inherit_line_colour,
             });
 
             for (vm.linker.files.keys()) |path| {

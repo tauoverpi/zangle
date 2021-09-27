@@ -17,6 +17,7 @@ gpa: *Allocator,
 colour: u8 = 0,
 target: Target = .{},
 text_colour: u24 = 0,
+inherit: bool = false,
 colours: []const u24 = &.{},
 
 pub const Stack = ArrayList(Layer);
@@ -46,6 +47,7 @@ pub const GraphOptions = struct {
     background: u24 = 0,
     text: u24 = 0,
     colours: []const u24 = &.{},
+    inherit: bool = false,
 };
 
 pub fn begin(self: *GraphContext, options: GraphOptions) !void {
@@ -66,6 +68,7 @@ pub fn begin(self: *GraphContext, options: GraphOptions) !void {
 
     self.colours = options.colours;
     self.text_colour = options.text;
+    self.inherit = options.inherit;
 }
 
 pub fn end(self: *GraphContext) !void {
@@ -111,15 +114,31 @@ fn render(self: *GraphContext, name: []const u8) !void {
     const theme = try self.target.getOrPut(self.gpa, name.ptr);
     if (!theme.found_existing) {
         theme.value_ptr.* = self.colour;
-        self.colour +%= 1;
+        defer self.colour +%= 1;
 
-        try writer.print(
-            \\    "{[name]s}"[fontcolor = "#{[colour]x:0>6}"];
-            \\
-        , .{
-            .name = name,
-            .colour = self.text_colour,
-        });
+        const selected = if (self.colours.len == 0)
+            self.colour
+        else
+            self.colours[self.colour % self.colours.len];
+
+        if (self.inherit) {
+            try writer.print(
+                \\    "{[name]s}"[fontcolor = "#{[colour]x:0>6}", color = "#{[inherit]x:0>6}"];
+                \\
+            , .{
+                .name = name,
+                .colour = self.text_colour,
+                .inherit = selected,
+            });
+        } else {
+            try writer.print(
+                \\    "{[name]s}"[fontcolor = "#{[colour]x:0>6}"];
+                \\
+            , .{
+                .name = name,
+                .colour = self.colour,
+            });
+        }
     }
 
     for (sub_nodes) |sub| {

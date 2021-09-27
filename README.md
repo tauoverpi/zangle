@@ -96,6 +96,7 @@ $ zangle graph README.md | dot -Tpng -o grpah.png
         graph_text_colour: u24 = 0x000000,
         graph_background_colour: u24 = 0xffffff,
         graph_border_colour: u24 = 0x92abc9,
+        graph_inherit_line_colour: bool = false,
         graph_colours: []const u24 = &.{
             0xdf4d77,
             0x2288ed,
@@ -199,6 +200,7 @@ $ zangle graph README.md | dot -Tpng -o grpah.png
                     .background = options.graph_background_colour,
                     .text = options.graph_text_colour,
                     .colours = options.graph_colours,
+                    .inherit = options.graph_inherit_line_colour,
                 });
 
                 for (vm.linker.files.keys()) |path| {
@@ -262,6 +264,7 @@ $ zangle graph README.md | dot -Tpng -o grpah.png
         list_tags,
         list_files,
         graph_border_colour,
+        graph_inherit_line_colour,
         graph_colours,
         graph_background_colour,
         graph_text_colour,
@@ -278,6 +281,7 @@ $ zangle graph README.md | dot -Tpng -o grpah.png
             .{ "--graph-colours=", .graph_colours },
             .{ "--graph-background-colour=", .graph_background_colour },
             .{ "--graph-text-colour=", .graph_text_colour },
+            .{ "--graph-inherit-line-colour", .graph_inherit_line_colour },
             .{ "--", .@"--" },
         });
     };
@@ -411,6 +415,7 @@ $ zangle graph README.md | dot -Tpng -o grpah.png
                         .graph_border_colour => options.graph_border_colour = try parseColour(arg[split..]),
                         .graph_background_colour => options.graph_background_colour = try parseColour(arg[split..]),
                         .graph_text_colour => options.graph_text_colour = try parseColour(arg[split..]),
+                        .graph_inherit_line_colour => options.graph_inherit_line_colour = true,
 
                         .graph_colours => {
                             var it = mem.tokenize(u8, arg[split..], ",");
@@ -1072,6 +1077,7 @@ Rendering is handled by passing a context in which to run the program.
     colour: u8 = 0,
     target: Target = .{},
     text_colour: u24 = 0,
+    inherit: bool = false,
     colours: []const u24 = &.{},
 
     pub const Stack = ArrayList(Layer);
@@ -1101,6 +1107,7 @@ Rendering is handled by passing a context in which to run the program.
         background: u24 = 0,
         text: u24 = 0,
         colours: []const u24 = &.{},
+        inherit: bool = false,
     };
 
     pub fn begin(self: *GraphContext, options: GraphOptions) !void {
@@ -1121,6 +1128,7 @@ Rendering is handled by passing a context in which to run the program.
 
         self.colours = options.colours;
         self.text_colour = options.text;
+        self.inherit = options.inherit;
     }
 
     pub fn end(self: *GraphContext) !void {
@@ -1166,15 +1174,31 @@ Rendering is handled by passing a context in which to run the program.
         const theme = try self.target.getOrPut(self.gpa, name.ptr);
         if (!theme.found_existing) {
             theme.value_ptr.* = self.colour;
-            self.colour +%= 1;
+            defer self.colour +%= 1;
 
-            try writer.print(
-                \\    "{[name]s}"[fontcolor = "#{[colour]x:0>6}"];
-                \\
-            , .{
-                .name = name,
-                .colour = self.text_colour,
-            });
+            const selected = if (self.colours.len == 0)
+                self.colour
+            else
+                self.colours[self.colour % self.colours.len];
+
+            if (self.inherit) {
+                try writer.print(
+                    \\    "{[name]s}"[fontcolor = "#{[colour]x:0>6}", color = "#{[inherit]x:0>6}"];
+                    \\
+                , .{
+                    .name = name,
+                    .colour = self.text_colour,
+                    .inherit = selected,
+                });
+            } else {
+                try writer.print(
+                    \\    "{[name]s}"[fontcolor = "#{[colour]x:0>6}"];
+                    \\
+                , .{
+                    .name = name,
+                    .colour = self.colour,
+                });
+            }
         }
 
         for (sub_nodes) |sub| {
