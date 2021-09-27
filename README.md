@@ -97,6 +97,7 @@ $ zangle graph README.md | dot -Tpng -o grpah.png
         graph_background_colour: u24 = 0xffffff,
         graph_border_colour: u24 = 0x92abc9,
         graph_inherit_line_colour: bool = false,
+        graph_line_gradient: u8 = 5,
         graph_colours: []const u24 = &.{
             0xdf4d77,
             0x2288ed,
@@ -201,6 +202,7 @@ $ zangle graph README.md | dot -Tpng -o grpah.png
                     .text = options.graph_text_colour,
                     .colours = options.graph_colours,
                     .inherit = options.graph_inherit_line_colour,
+                    .gradient = options.graph_line_gradient,
                 });
 
                 for (vm.linker.files.keys()) |path| {
@@ -267,6 +269,7 @@ $ zangle graph README.md | dot -Tpng -o grpah.png
         graph_inherit_line_colour,
         graph_colours,
         graph_background_colour,
+        graph_line_gradient,
         graph_text_colour,
         @"--",
 
@@ -282,6 +285,7 @@ $ zangle graph README.md | dot -Tpng -o grpah.png
             .{ "--graph-background-colour=", .graph_background_colour },
             .{ "--graph-text-colour=", .graph_text_colour },
             .{ "--graph-inherit-line-colour", .graph_inherit_line_colour },
+            .{ "--graph-line-gradient=", .graph_line_gradient },
             .{ "--", .@"--" },
         });
     };
@@ -316,8 +320,12 @@ $ zangle graph README.md | dot -Tpng -o grpah.png
     const graph_help =
         \\Usage: zangle graph [files]
         \\
-        \\  --graph-border=[#rrggbb]       Select item border colour
-        \\  --graph-colours=[#rrggbb,...]  Select spline colours
+        \\  --graph-border=[#rrggbb]             Set item border colour
+        \\  --graph-colours=[#rrggbb,...]        Set spline colours
+        \\  --graph-background-colour=[#rrggbb]  Set the background colour of the graph
+        \\  --graph-text-colour=[#rrggbb]        Set node label text colour
+        \\  --graph-inherit-line-colour          Borders inherit their colour from the choden line colour
+        \\  --graph-line-gradient=[number]       Set the gradient level
     ;
 
     const log = std.log;
@@ -416,6 +424,9 @@ $ zangle graph README.md | dot -Tpng -o grpah.png
                         .graph_background_colour => options.graph_background_colour = try parseColour(arg[split..]),
                         .graph_text_colour => options.graph_text_colour = try parseColour(arg[split..]),
                         .graph_inherit_line_colour => options.graph_inherit_line_colour = true,
+                        .graph_line_gradient => options.graph_line_gradient = fmt.parseInt(u8, arg[split..], 10) catch {
+                            return error.@"Invalid value specified, expected a number between 0-255 (inclusive)";
+                        },
 
                         .graph_colours => {
                             var it = mem.tokenize(u8, arg[split..], ",");
@@ -1055,7 +1066,7 @@ Rendering is handled by passing a context in which to run the program.
 
 ### Graph context
 
-    lang: zig esc: none file: src/GraphContext.zig
+    lang: zig esc: [[]] file: src/GraphContext.zig
     ----------------------------------------------
 
     const std = @import("std");
@@ -1079,6 +1090,7 @@ Rendering is handled by passing a context in which to run the program.
     text_colour: u24 = 0,
     inherit: bool = false,
     colours: []const u24 = &.{},
+    gradient: u8 = 5,
 
     pub const Stack = ArrayList(Layer);
     pub const Layer = struct {
@@ -1108,6 +1120,7 @@ Rendering is handled by passing a context in which to run the program.
         text: u24 = 0,
         colours: []const u24 = &.{},
         inherit: bool = false,
+        gradient: u8 = 0,
     };
 
     pub fn begin(self: *GraphContext, options: GraphOptions) !void {
@@ -1129,6 +1142,7 @@ Rendering is handled by passing a context in which to run the program.
         self.colours = options.colours;
         self.text_colour = options.text;
         self.inherit = options.inherit;
+        self.gradient = options.gradient;
     }
 
     pub fn end(self: *GraphContext) !void {
@@ -1159,6 +1173,13 @@ Rendering is handled by passing a context in which to run the program.
 
         assert(self.stack.items.len == 1);
     }
+
+    [[graph context render node]]
+
+<!-- -->
+
+    lang: zig esc: [[]] tag: #graph context render node
+    ---------------------------------------------------
 
     fn render(self: *GraphContext, name: []const u8) !void {
         const writer = self.stream.writer();
@@ -1196,7 +1217,7 @@ Rendering is handled by passing a context in which to run the program.
                     \\
                 , .{
                     .name = name,
-                    .colour = self.colour,
+                    .colour = self.text_colour,
                 });
             }
         }
@@ -1208,18 +1229,65 @@ Rendering is handled by passing a context in which to run the program.
             });
 
             if (!entry.found_existing) {
-                const colour = self.target.get(sub.ptr).?;
-                const selected = if (self.colours.len == 0)
-                    0
-                else
-                    self.colours[colour % self.colours.len];
+                const to = self.target.get(sub.ptr).?;
+                const from = self.target.get(name.ptr).?;
 
-                try writer.print("    \"{s}\" -- ", .{name});
-                try writer.print("\"{s}\"[color = \"#{x:0>6}\"];\n", .{
-                    sub,
-                    selected,
-                });
+                const selected: struct { from: u24, to: u24 } = if (self.colours.len == 0) .{
+                    .from = 0,
+                    .to = 0,
+                } else .{
+                    .from = self.colours[from % self.colours.len],
+                    .to = self.colours[to % self.colours.len],
+                };
+
+                try writer.print(
+                    \\    "{s}" -- "{s}" [color = "
+                , .{ name, sub });
+
+                [[graph context gradient]]
+
+                try writer.print(
+                    \\#{x:0>6}"];
+                    \\
+                , .{selected.to});
             }
+        }
+    }
+
+#### Gradients
+
+Node graphs can be rather difficult when they result in a directed acyclic
+graph instead of the usual tree structure that most projects will have; for
+those situations, targeted colour may not be enough to trace paths correctly.
+However, gradients offer enough variation to avoid the problem in most cases
+and they tend to look good most of the time making them a good default.
+
+The implementation interpolates between the parent and child node colours
+and inserts the results in the node's `color` list to create the effect.
+
+    lang: zig esc: none tag: #graph context gradient
+    ------------------------------------------------
+
+    if (self.gradient != 0) {
+        var i: i24 = 0;
+        const r: i32 = @truncate(u8, selected.from >> 16);
+        const g: i32 = @truncate(u8, selected.from >> 8);
+        const b: i32 = @truncate(u8, selected.from);
+
+        const x: i32 = @truncate(u8, selected.to >> 16);
+        const y: i32 = @truncate(u8, selected.to >> 8);
+        const z: i32 = @truncate(u8, selected.to);
+
+        const dx = @divTrunc(x - r, self.gradient);
+        const gy = @divTrunc(y - g, self.gradient);
+        const bz = @divTrunc(z - b, self.gradient);
+
+        while (i < self.gradient) : (i += 1) {
+            const red = r + dx * i;
+            const green = g + gy * i;
+            const blue = b + bz * i;
+            const rgb = @bitCast(u24, @truncate(i24, red << 16 | (green << 8) | (blue & 0xff)));
+            try writer.print("#{x:0>6};0.{d}:", .{ rgb, 1.0 / @intToFloat(f32, self.gradient) });
         }
     }
 

@@ -19,6 +19,7 @@ target: Target = .{},
 text_colour: u24 = 0,
 inherit: bool = false,
 colours: []const u24 = &.{},
+gradient: u8 = 5,
 
 pub const Stack = ArrayList(Layer);
 pub const Layer = struct {
@@ -48,6 +49,7 @@ pub const GraphOptions = struct {
     text: u24 = 0,
     colours: []const u24 = &.{},
     inherit: bool = false,
+    gradient: u8 = 0,
 };
 
 pub fn begin(self: *GraphContext, options: GraphOptions) !void {
@@ -69,6 +71,7 @@ pub fn begin(self: *GraphContext, options: GraphOptions) !void {
     self.colours = options.colours;
     self.text_colour = options.text;
     self.inherit = options.inherit;
+    self.gradient = options.gradient;
 }
 
 pub fn end(self: *GraphContext) !void {
@@ -136,7 +139,7 @@ fn render(self: *GraphContext, name: []const u8) !void {
                 \\
             , .{
                 .name = name,
-                .colour = self.colour,
+                .colour = self.text_colour,
             });
         }
     }
@@ -148,17 +151,48 @@ fn render(self: *GraphContext, name: []const u8) !void {
         });
 
         if (!entry.found_existing) {
-            const colour = self.target.get(sub.ptr).?;
-            const selected = if (self.colours.len == 0)
-                0
-            else
-                self.colours[colour % self.colours.len];
+            const to = self.target.get(sub.ptr).?;
+            const from = self.target.get(name.ptr).?;
 
-            try writer.print("    \"{s}\" -- ", .{name});
-            try writer.print("\"{s}\"[color = \"#{x:0>6}\"];\n", .{
-                sub,
-                selected,
-            });
+            const selected: struct { from: u24, to: u24 } = if (self.colours.len == 0) .{
+                .from = 0,
+                .to = 0,
+            } else .{
+                .from = self.colours[from % self.colours.len],
+                .to = self.colours[to % self.colours.len],
+            };
+
+            try writer.print(
+                \\    "{s}" -- "{s}" [color = "
+            , .{ name, sub });
+
+            if (self.gradient != 0) {
+                var i: i24 = 0;
+                const r: i32 = @truncate(u8, selected.from >> 16);
+                const g: i32 = @truncate(u8, selected.from >> 8);
+                const b: i32 = @truncate(u8, selected.from);
+
+                const x: i32 = @truncate(u8, selected.to >> 16);
+                const y: i32 = @truncate(u8, selected.to >> 8);
+                const z: i32 = @truncate(u8, selected.to);
+
+                const dx = @divTrunc(x - r, self.gradient);
+                const gy = @divTrunc(y - g, self.gradient);
+                const bz = @divTrunc(z - b, self.gradient);
+
+                while (i < self.gradient) : (i += 1) {
+                    const red = r + dx * i;
+                    const green = g + gy * i;
+                    const blue = b + bz * i;
+                    const rgb = @bitCast(u24, @truncate(i24, red << 16 | (green << 8) | (blue & 0xff)));
+                    try writer.print("#{x:0>6};0.{d}:", .{ rgb, 1.0 / @intToFloat(f32, self.gradient) });
+                }
+            }
+
+            try writer.print(
+                \\#{x:0>6}"];
+                \\
+            , .{selected.to});
         }
     }
 }

@@ -34,6 +34,7 @@ const Options = struct {
     graph_background_colour: u24 = 0xffffff,
     graph_border_colour: u24 = 0x92abc9,
     graph_inherit_line_colour: bool = false,
+    graph_line_gradient: u8 = 5,
     graph_colours: []const u24 = &.{
         0xdf4d77,
         0x2288ed,
@@ -79,6 +80,7 @@ const Flag = enum {
     graph_inherit_line_colour,
     graph_colours,
     graph_background_colour,
+    graph_line_gradient,
     graph_text_colour,
     @"--",
 
@@ -94,6 +96,7 @@ const Flag = enum {
         .{ "--graph-background-colour=", .graph_background_colour },
         .{ "--graph-text-colour=", .graph_text_colour },
         .{ "--graph-inherit-line-colour", .graph_inherit_line_colour },
+        .{ "--graph-line-gradient=", .graph_line_gradient },
         .{ "--", .@"--" },
     });
 };
@@ -128,8 +131,12 @@ const find_help =
 const graph_help =
     \\Usage: zangle graph [files]
     \\
-    \\  --graph-border=[#rrggbb]       Select item border colour
-    \\  --graph-colours=[#rrggbb,...]  Select spline colours
+    \\  --graph-border=[#rrggbb]             Set item border colour
+    \\  --graph-colours=[#rrggbb,...]        Set spline colours
+    \\  --graph-background-colour=[#rrggbb]  Set the background colour of the graph
+    \\  --graph-text-colour=[#rrggbb]        Set node label text colour
+    \\  --graph-inherit-line-colour          Borders inherit their colour from the choden line colour
+    \\  --graph-line-gradient=[number]       Set the gradient level
 ;
 
 const log = std.log;
@@ -228,6 +235,9 @@ fn parseCli(gpa: *Allocator, objects: *Linker.Object.List) !?Options {
                     .graph_background_colour => options.graph_background_colour = try parseColour(arg[split..]),
                     .graph_text_colour => options.graph_text_colour = try parseColour(arg[split..]),
                     .graph_inherit_line_colour => options.graph_inherit_line_colour = true,
+                    .graph_line_gradient => options.graph_line_gradient = fmt.parseInt(u8, arg[split..], 10) catch {
+                        return error.@"Invalid value specified, expected a number between 0-255 (inclusive)";
+                    },
 
                     .graph_colours => {
                         var it = mem.tokenize(u8, arg[split..], ",");
@@ -396,6 +406,7 @@ pub fn run() !void {
                 .text = options.graph_text_colour,
                 .colours = options.graph_colours,
                 .inherit = options.graph_inherit_line_colour,
+                .gradient = options.graph_line_gradient,
             });
 
             for (vm.linker.files.keys()) |path| {
