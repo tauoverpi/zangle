@@ -1748,6 +1748,26 @@ TODO: short-circuit on non local module end
 
 ## Tokenizer
 
+![Zangle tokenizer state transition graph](out/tokenizer-state-transitions.png)
+
+\hidden{
+
+    lang: dot esc: {{}} file: graphs/tokenizer-state-transitions.dot
+    ----------------------------------------------------------------
+
+    digraph G {
+        node [shape = doublecircle] start;
+        node [shape = rectangle];
+        rankdir = LR;
+        layout = "dot";
+
+        {{tokenizer state transition}}
+    }
+
+}
+
+<!-- -->
+
     lang: zig esc: [[]] file: lib/Tokenizer.zig
     -------------------------------------------
 
@@ -1809,7 +1829,6 @@ TODO: short-circuit on non local module end
         while (self.index < self.bytes.len) : (self.index += 1) {
             const c = self.bytes[self.index];
             switch (state) {
-                .trivial => if (c != trivial) break,
                 .start => switch (c) {
                     [[zangle tokenizer start transitions]]
                 },
@@ -1824,7 +1843,33 @@ TODO: short-circuit on non local module end
 
     [[zangle tokenizer tests]]
 
+#### Trivial
+
+\hidden{
+
+    lang: dot esc: none tag: #tokenizer state transition
+    ----------------------------------------------------
+
+    trivial -> trivial [label = "same byte"];
+    trivial -> end;
+
+}
+
+    lang: zig esc: none tag: #zangle tokenizer state transitions
+    ------------------------------------------------------------
+
+    .trivial => if (c != trivial) break,
+
 #### Whitespace
+
+\hidden{
+
+    lang: dot esc: none tag: #tokenizer state transition
+    ----------------------------------------------------
+
+    start -> trivial [label = "space, nl"];
+
+}
 
 Whitespace of the same type is consumed as a single token.
 
@@ -1851,6 +1896,17 @@ Whitespace of the same type is consumed as a single token.
 
 #### Header
 
+\hidden{
+
+    lang: dot esc: none tag: #tokenizer state transition
+    ----------------------------------------------------
+
+    start -> trivial [label = "line"];
+    start -> word [label = "a...z"];
+    start -> end [label = "hash, colon"];
+
+}
+
     lang: zig esc: none tag: #zangle tokenizer start transitions
     ------------------------------------------------------------
 
@@ -1871,7 +1927,15 @@ Whitespace of the same type is consumed as a single token.
         break;
     },
 
-<!-- -->
+\hidden{
+
+    lang: dot esc: none tag: #tokenizer state transition
+    ----------------------------------------------------
+
+    word -> word [label = "a...z, A...Z, #, +, -, \\, _"];
+    word -> end;
+
+}
 
     lang: zig esc: none tag: #zangle tokenizer state transitions
     ------------------------------------------------------------
@@ -1897,6 +1961,15 @@ Whitespace of the same type is consumed as a single token.
 
 #### Include
 
+\hidden{
+
+    lang: dot esc: none tag: #tokenizer state transition
+    ----------------------------------------------------
+
+    start -> trivial [label = "<, {, [, (, ), ], }, >"];
+
+}
+
     lang: zig esc: none tag: #zangle tokenizer start transitions
     ------------------------------------------------------------
 
@@ -1906,7 +1979,14 @@ Whitespace of the same type is consumed as a single token.
         state = .trivial;
     },
 
-<!-- -->
+\hidden{
+
+    lang: dot esc: none tag: #tokenizer state transition
+    ----------------------------------------------------
+
+    start -> end [label = "pipe"];
+
+}
 
     lang: zig esc: none tag: #zangle tokenizer start transitions
     ------------------------------------------------------------
@@ -1929,6 +2009,15 @@ Whitespace of the same type is consumed as a single token.
 
 #### Unknown
 
+\hidden{
+
+    lang: dot esc: none tag: #tokenizer state transition
+    ----------------------------------------------------
+
+    start -> unknown [label = "unknown"];
+
+}
+
     lang: zig esc: none tag: #zangle tokenizer start transitions
     ------------------------------------------------------------
 
@@ -1937,7 +2026,15 @@ Whitespace of the same type is consumed as a single token.
         state = .unknown;
     },
 
-<!-- -->
+\hidden{
+
+    lang: dot esc: none tag: #tokenizer state transition
+    ----------------------------------------------------
+
+    unknown -> unknown;
+    unknown -> end [label = "nl, <, {, [, (, ), ], }, >, colon, pipe"];
+
+}
 
     lang: zig esc: none tag: #zangle tokenizer state transitions
     ------------------------------------------------------------

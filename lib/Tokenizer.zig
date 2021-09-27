@@ -93,7 +93,6 @@ pub fn next(self: *Tokenizer) Token {
     while (self.index < self.bytes.len) : (self.index += 1) {
         const c = self.bytes[self.index];
         switch (state) {
-            .trivial => if (c != trivial) break,
             .start => switch (c) {
                 ' ', '\n' => {
                     token.tag = @intToEnum(Token.Tag, c);
@@ -132,6 +131,7 @@ pub fn next(self: *Tokenizer) Token {
                 },
             },
 
+            .trivial => if (c != trivial) break,
             .word => switch (c) {
                 'a'...'z', 'A'...'Z', '#', '+', '-', '\'', '_' => {},
                 else => break,
