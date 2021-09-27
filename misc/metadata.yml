@@ -1,0 +1,17 @@
+title: Zangle
+author: Simon A. Nielsen Knights
+numbersections: yes
+lang: en
+monofont: Victor Mono
+documentclass: article
+links-as-notes: true
+geometry:
+  - margin=0.8in
+pagestyle: headings
+
+
+header-includes: |
+  \usepackage{tikz,float,verbatim}
+  \usetikzlibrary{arrows,automata,positioning}
+  \newcommand{\hidden}[1]{}
+
