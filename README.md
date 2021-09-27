@@ -137,7 +137,7 @@ $ zangle graph README.md | dot -Tpng -o grpah.png
 
         try vm.linker.link(gpa);
 
-        log.info("processing command {s}", .{@tagName(options.command)});
+        log.debug("processing command {s}", .{@tagName(options.command)});
 
         switch (options.command) {
             .help => unreachable, // handled in parseCli

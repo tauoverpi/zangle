@@ -329,7 +329,7 @@ pub fn run() !void {
 
     try vm.linker.link(gpa);
 
-    log.info("processing command {s}", .{@tagName(options.command)});
+    log.debug("processing command {s}", .{@tagName(options.command)});
 
     switch (options.command) {
         .help => unreachable, // handled in parseCli
