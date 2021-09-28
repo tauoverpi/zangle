@@ -13,29 +13,21 @@ indented code blocks.
 
 Tangle all files within a document.
 
-```
-$ rm -rf src lib
-$ zangle tangle README.md
-$ tree src lib
-```
+    $ rm -rf src lib
+    $ zangle tangle README.md
+    $ tree src lib
 
 List all files and tags in the document.
 
-```
-$ zangle ls README.md --list-tags --list-files
-```
+    $ zangle ls README.md --list-tags --list-files
 
 Render the content of a tag and file to stdout.
 
-```
-$ zangle call README.md --tag=linker --file=lib/lib.zig
-```
+    $ zangle call README.md --tag=linker --file=lib/lib.zig
 
 Render a graph representing document structure.
 
-```
-$ zangle graph README.md | dot -Tpng -o grpah.png
-```
+    $ zangle graph README.md | dot -Tpng -o grpah.png
 
 ## As a library
 
