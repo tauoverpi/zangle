@@ -409,7 +409,7 @@ fn parseBody(p: *Parser, gpa: *Allocator, header: Header) !void {
                     continue;
                 }
 
-                if (token.start - sol < 0) {
+                if (token.start - sol > 0) {
                     try p.emitWrite(gpa, .{
                         .start = @intCast(u32, sol),
                         .len = @intCast(u16, token.start - sol),
@@ -936,6 +936,23 @@ test "compile block inline" {
     , .{
         .program = &.{ .call, .call, .ret },
         .symbols = &.{ "one", "two" },
+        .exports = &.{"here"},
+    });
+}
+
+test "compile block inline indent" {
+    try testCompile(
+        \\begin
+        \\
+        \\    lang: zig esc: <<>> tag: #here
+        \\    ------------------------------
+        \\
+        \\    one<<two>>
+        \\
+        \\end
+    , .{
+        .program = &.{ .write, .call, .ret },
+        .symbols = &.{"two"},
         .exports = &.{"here"},
     });
 }

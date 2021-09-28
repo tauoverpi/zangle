@@ -2404,7 +2404,7 @@ TODO: link tags to their definition
                         continue;
                     }
 
-                    if (token.start - sol < 0) {
+                    if (token.start - sol > 0) {
                         try p.emitWrite(gpa, .{
                             .start = @intCast(u32, sol),
                             .len = @intCast(u16, token.start - sol),
@@ -2957,6 +2957,23 @@ Pipes pass code blocks through external programs.
         , .{
             .program = &.{ .call, .call, .ret },
             .symbols = &.{ "one", "two" },
+            .exports = &.{"here"},
+        });
+    }
+
+    test "compile block inline indent" {
+        try testCompile(
+            \\begin
+            \\
+            \\    lang: zig esc: <<>> tag: #here
+            \\    ------------------------------
+            \\
+            \\    one<<two>>
+            \\
+            \\end
+        , .{
+            .program = &.{ .write, .call, .ret },
+            .symbols = &.{"two"},
             .exports = &.{"here"},
         });
     }
