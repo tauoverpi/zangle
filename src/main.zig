@@ -442,19 +442,21 @@ fn createFile(path: []const u8, options: Options) !fs.File {
     var fba = std.heap.FixedBufferAllocator.init(&tmp);
     var filename = path;
 
-    if (mem.startsWith(u8, filename, "~/")) {
+    if (filename.len > 2 and mem.eql(u8, filename[0..2], "~/")) {
         filename = try fs.path.join(&fba.allocator, &.{
             os.getenv("HOME") orelse return error.@"unable to find ~/",
             filename[2..],
         });
+
+        log.warn("file with an absolute path: {s}", .{filename});
     }
 
-    if (path[0] == '/' and !options.allow_absolute_paths) {
+    if ((path[0] == '/' or path[0] == '~') and !options.allow_absolute_paths) {
         return error.@"Absolute paths disabled; use --allow-absolute-paths to enable them.";
     }
 
-    if (fs.path.dirname(path)) |dir| try fs.cwd().makePath(dir);
+    if (fs.path.dirname(filename)) |dir| try fs.cwd().makePath(dir);
 
     log.info("writing file: {s}", .{filename});
-    return try fs.cwd().createFile(path, .{ .truncate = true });
+    return try fs.cwd().createFile(filename, .{ .truncate = true });
 }
