@@ -44,5 +44,5 @@ any other license will be rejected.
 
 ## Remember
 
-Append your name link to your github profile to CONTRIBUTORS.md if this is
-your first contribution to the project.
+Append your name and link your github profile in CONTRIBUTORS.md if this
+is your first contribution to the project.
