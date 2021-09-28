@@ -2,7 +2,7 @@ title: Zangle
 author: Simon A. Nielsen Knights
 numbersections: yes
 lang: en
-monofont: Victor Mono
+monofont: IBM Plex Mono
 documentclass: article
 links-as-notes: true
 geometry:
