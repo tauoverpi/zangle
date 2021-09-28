@@ -205,13 +205,23 @@ $ zangle graph README.md | dot -Tpng -o grpah.png
                     .gradient = options.graph_line_gradient,
                 });
 
-                for (vm.linker.files.keys()) |path| {
-                    try vm.callFile(gpa, path, *GraphContext, &context);
-                }
+                if (options.calls.len != 0) {
+                    for (options.calls) |call| switch (call) {
+                        .tag => unreachable, // not an option for graph
+                        .file => |file| {
+                            log.debug("rendering graph for file {s}", .{file});
+                            try vm.callFile(gpa, file, *GraphContext, &context);
+                        },
+                    };
+                } else {
+                    for (vm.linker.files.keys()) |path| {
+                        try vm.callFile(gpa, path, *GraphContext, &context);
+                    }
 
-                for (vm.linker.procedures.keys()) |proc| {
-                    if (!context.target.contains(proc.ptr)) {
-                        try vm.call(gpa, proc, *GraphContext, &context);
+                    for (vm.linker.procedures.keys()) |proc| {
+                        if (!context.target.contains(proc.ptr)) {
+                            try vm.call(gpa, proc, *GraphContext, &context);
+                        }
                     }
                 }
 
@@ -320,6 +330,7 @@ $ zangle graph README.md | dot -Tpng -o grpah.png
     const graph_help =
         \\Usage: zangle graph [files]
         \\
+        \\  --file=[filepath]                    Render the graph for the given file
         \\  --graph-border=[#rrggbb]             Set item border colour
         \\  --graph-colours=[#rrggbb,...]        Set spline colours
         \\  --graph-background-colour=[#rrggbb]  Set the background colour of the graph
@@ -420,6 +431,7 @@ $ zangle graph README.md | dot -Tpng -o grpah.png
                     },
 
                     .graph => switch (flag) {
+                        .file => try calls.append(.{ .file = arg[split..] }),
                         .graph_border_colour => options.graph_border_colour = try parseColour(arg[split..]),
                         .graph_background_colour => options.graph_background_colour = try parseColour(arg[split..]),
                         .graph_text_colour => options.graph_text_colour = try parseColour(arg[split..]),
