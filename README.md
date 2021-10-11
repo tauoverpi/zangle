@@ -620,7 +620,7 @@ entry-point of the procedure.
     lang: zig esc: none tag: #interpreter step
     ------------------------------------------
 
-    fn execRet(vm: *Interpreter, comptime T: type, data: Instruction.Data.Ret, eval: T) !bool {
+    fn execRet(vm: *Interpreter, comptime T: type, data: Instruction.Data.Ret, eval: T) Child(T).Error!bool {
         const name = vm.linker.objects.items[vm.module - 1]
             .text[data.start .. data.start + data.len];
 
@@ -701,7 +701,7 @@ local to the current module.
     lang: zig esc: none tag: #interpreter step
     ------------------------------------------
 
-    fn execJmp(vm: *Interpreter, comptime T: type, data: Instruction.Data.Jmp, eval: T) !void {
+    fn execJmp(vm: *Interpreter, comptime T: type, data: Instruction.Data.Jmp, eval: T) Child(T).Error!void {
         const mod = vm.module;
         const ip = vm.ip;
 
@@ -770,7 +770,18 @@ current module.
     lang: zig esc: none tag: #interpreter step
     ------------------------------------------
 
-    fn execCall(vm: *Interpreter, comptime T: type, data: Instruction.Data.Call, gpa: *Allocator, eval: T) !void {
+    pub const CallError = error{
+        @"Cyclic reference detected",
+        OutOfMemory,
+    };
+
+    fn execCall(
+        vm: *Interpreter,
+        comptime T: type,
+        data: Instruction.Data.Call,
+        gpa: *Allocator,
+        eval: T,
+    ) (CallError || Child(T).Error)!void {
         if (vm.stack.contains(vm.ip)) {
             return error.@"Cyclic reference detected";
         }
@@ -900,7 +911,7 @@ A trail of newline characters is emitted after the text as specified in the
         data: Instruction.Data.Write,
         text: []const u8,
         eval: T,
-    ) !void {
+    ) Child(T).Error!void {
         if (vm.should_indent and vm.last_is_newline) {
             if (@hasDecl(Child(T), "indent")) try eval.indent(vm);
             log.debug("[mod {d} ip {x:0>8}] indent(len {d})", .{
@@ -943,6 +954,8 @@ Rendering is handled by passing a context in which to run the program.
     const Test = struct {
         stream: Stream,
 
+        pub const Error = Stream.WriteError;
+
         pub const Stream = std.io.FixedBufferStream([]u8);
 
         pub fn write(self: *Test, vm: *Interpreter, text: []const u8, nl: u16) !void {
@@ -970,6 +983,8 @@ Rendering is handled by passing a context in which to run the program.
 
     const FileContext = struct {
         stream: Stream,
+
+        pub const Error = std.os.WriteError;
 
         pub const Stream = io.BufferedWriter(1024, std.fs.File.Writer);
 
@@ -1015,6 +1030,8 @@ Rendering is handled by passing a context in which to run the program.
     gpa: *Allocator,
 
     const log = std.log.scoped(.find_context);
+
+    pub const Error = error{OutOfMemory} || std.os.WriteError;
 
     pub const Stream = io.BufferedWriter(1024, std.fs.File.Writer);
 
@@ -1103,6 +1120,8 @@ Rendering is handled by passing a context in which to run the program.
     inherit: bool = false,
     colours: []const u24 = &.{},
     gradient: u8 = 5,
+
+    pub const Error = error{OutOfMemory} || std.os.WriteError;
 
     pub const Stack = ArrayList(Layer);
     pub const Layer = struct {
@@ -3311,6 +3330,8 @@ Pipes pass code blocks through external programs.
     }
 
     const Render = struct {
+        pub const Error = @TypeOf(output).Writer.Error;
+
         pub fn write(_: Render, v: *Interpreter, text: []const u8, nl: u16) !void {
             _ = v;
             const writer = output.writer();

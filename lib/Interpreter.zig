@@ -47,7 +47,7 @@ pub fn step(vm: *Interpreter, gpa: *Allocator, comptime T: type, eval: T) !bool 
     return true;
 }
 
-fn execRet(vm: *Interpreter, comptime T: type, data: Instruction.Data.Ret, eval: T) !bool {
+fn execRet(vm: *Interpreter, comptime T: type, data: Instruction.Data.Ret, eval: T) Child(T).Error!bool {
     const name = vm.linker.objects.items[vm.module - 1]
         .text[data.start .. data.start + data.len];
 
@@ -84,7 +84,7 @@ fn execRet(vm: *Interpreter, comptime T: type, data: Instruction.Data.Ret, eval:
 
     return false;
 }
-fn execJmp(vm: *Interpreter, comptime T: type, data: Instruction.Data.Jmp, eval: T) !void {
+fn execJmp(vm: *Interpreter, comptime T: type, data: Instruction.Data.Jmp, eval: T) Child(T).Error!void {
     const mod = vm.module;
     const ip = vm.ip;
 
@@ -106,7 +106,18 @@ fn execJmp(vm: *Interpreter, comptime T: type, data: Instruction.Data.Jmp, eval:
 
     vm.last_is_newline = true;
 }
-fn execCall(vm: *Interpreter, comptime T: type, data: Instruction.Data.Call, gpa: *Allocator, eval: T) !void {
+pub const CallError = error{
+    @"Cyclic reference detected",
+    OutOfMemory,
+};
+
+fn execCall(
+    vm: *Interpreter,
+    comptime T: type,
+    data: Instruction.Data.Call,
+    gpa: *Allocator,
+    eval: T,
+) (CallError || Child(T).Error)!void {
     if (vm.stack.contains(vm.ip)) {
         return error.@"Cyclic reference detected";
     }
@@ -154,7 +165,7 @@ fn execWrite(
     data: Instruction.Data.Write,
     text: []const u8,
     eval: T,
-) !void {
+) Child(T).Error!void {
     if (vm.should_indent and vm.last_is_newline) {
         if (@hasDecl(Child(T), "indent")) try eval.indent(vm);
         log.debug("[mod {d} ip {x:0>8}] indent(len {d})", .{
@@ -186,6 +197,8 @@ fn execWrite(
 }
 const Test = struct {
     stream: Stream,
+
+    pub const Error = Stream.WriteError;
 
     pub const Stream = std.io.FixedBufferStream([]u8);
 

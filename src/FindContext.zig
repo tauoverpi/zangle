@@ -19,6 +19,8 @@ gpa: *Allocator,
 
 const log = std.log.scoped(.find_context);
 
+pub const Error = error{OutOfMemory} || std.os.WriteError;
+
 pub const Stream = io.BufferedWriter(1024, std.fs.File.Writer);
 
 pub const Stack = ArrayList(Location);

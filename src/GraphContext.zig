@@ -21,6 +21,8 @@ inherit: bool = false,
 colours: []const u24 = &.{},
 gradient: u8 = 5,
 
+pub const Error = error{OutOfMemory} || std.os.WriteError;
+
 pub const Stack = ArrayList(Layer);
 pub const Layer = struct {
     list: ArrayList([]const u8) = .{},

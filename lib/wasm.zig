@@ -57,6 +57,8 @@ pub export fn reset() void {
 }
 
 const Render = struct {
+    pub const Error = @TypeOf(output).Writer.Error;
+
     pub fn write(_: Render, v: *Interpreter, text: []const u8, nl: u16) !void {
         _ = v;
         const writer = output.writer();

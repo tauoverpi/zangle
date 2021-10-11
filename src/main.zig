@@ -305,6 +305,8 @@ fn parseColour(text: []const u8) !u24 {
 const FileContext = struct {
     stream: Stream,
 
+    pub const Error = std.os.WriteError;
+
     pub const Stream = io.BufferedWriter(1024, std.fs.File.Writer);
 
     pub fn init(writer: fs.File.Writer) FileContext {
