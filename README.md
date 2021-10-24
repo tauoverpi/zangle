@@ -2403,52 +2403,64 @@ TODO: link tags to their definition
         p.location = location; // avoid RLS
 
         var nl: usize = 0;
-        while (p.eat(.space, @src())) |space| {
+        loop: while (p.eat(.space, @src())) |space| {
             if (space.len < 4) break;
             nl = 0;
 
             var sol = p.it.index - (space.len - 4);
-            while (p.next()) |token| switch (token.tag) {
-                .nl => {
-                    nl = token.len();
-
-                    try p.emitWrite(gpa, .{
-                        .start = @intCast(u32, sol),
-                        .len = @intCast(u16, token.start - sol),
-                        .nl = @intCast(u16, nl),
-                    });
-                    break;
-                },
-
-                .l_angle,
-                .l_brace,
-                .l_bracket,
-                .l_paren,
-                => if (header.delimiter) |delim| {
-                    if (delim[0] != @enumToInt(token.tag)) {
-                        log.debug("dilimiter doesn't match, skipping", .{});
-                        continue;
-                    }
-
-                    if (delim.len != token.len() * 2) {
-                        log.debug("dilimiter length doesn't match, skipping", .{});
-                        continue;
-                    }
-
-                    if (token.start - sol > 0) {
+            while (true) {
+                const token = p.it.next();
+                switch (token.tag) {
+                    .eof => {
                         try p.emitWrite(gpa, .{
                             .start = @intCast(u32, sol),
                             .len = @intCast(u16, token.start - sol),
                             .nl = 0,
                         });
-                    }
+                        break :loop;
+                    },
 
-                    try p.parseDelimiter(gpa, delim, token.start - sol);
-                    sol = p.it.index;
-                },
+                    .nl => {
+                        nl = token.len();
 
-                else => {},
-            };
+                        try p.emitWrite(gpa, .{
+                            .start = @intCast(u32, sol),
+                            .len = @intCast(u16, token.start - sol),
+                            .nl = @intCast(u16, nl),
+                        });
+                        break;
+                    },
+
+                    .l_angle,
+                    .l_brace,
+                    .l_bracket,
+                    .l_paren,
+                    => if (header.delimiter) |delim| {
+                        if (delim[0] != @enumToInt(token.tag)) {
+                            log.debug("dilimiter doesn't match, skipping", .{});
+                            continue;
+                        }
+
+                        if (delim.len != token.len() * 2) {
+                            log.debug("dilimiter length doesn't match, skipping", .{});
+                            continue;
+                        }
+
+                        if (token.start - sol > 0) {
+                            try p.emitWrite(gpa, .{
+                                .start = @intCast(u32, sol),
+                                .len = @intCast(u16, token.start - sol),
+                                .nl = 0,
+                            });
+                        }
+
+                        try p.parseDelimiter(gpa, delim, token.start - sol);
+                        sol = p.it.index;
+                    },
+
+                    else => {},
+                }
+            }
         }
 
         const len = p.program.len;
@@ -2458,7 +2470,7 @@ TODO: link tags to their definition
             if (item.len == 0) p.program.len -= 1;
         }
 
-        if (nl < 2) {
+        if (nl < 2 and p.it.index < p.it.bytes.len) {
             return error.@"Expected a blank line after the end of the code block";
         }
 
@@ -3150,8 +3162,6 @@ Pipes pass code blocks through external programs.
             \\    -----------------------------
             \\
             \\    abc
-            \\
-            \\end
         }, &.{
             .{ .name = "baz", .text = "abc" },
             .{ .name = "bar", .text = "abcabc" },

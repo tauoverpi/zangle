@@ -349,8 +349,6 @@ test "run multiple outputs common call" {
         \\    -----------------------------
         \\
         \\    abc
-        \\
-        \\end
     }, &.{
         .{ .name = "baz", .text = "abc" },
         .{ .name = "bar", .text = "abcabc" },
