@@ -69,7 +69,9 @@ Find where given tags reside within output files
     const fmt = std.fmt;
     const io = std.io;
     const os = std.os;
+    const math = std.math;
     const stdout = io.getStdOut().writer();
+    const stdin = io.getStdIn().reader();
 
     const Allocator = std.mem.Allocator;
     const ArrayList = std.ArrayListUnmanaged;
@@ -105,6 +107,7 @@ Find where given tags reside within output files
             0xe3bd79,
         },
         command: Command,
+        files: []const []const u8 = &.{},
 
         pub const FileOrTag = union(enum) {
             file: []const u8,
@@ -238,10 +241,17 @@ Find where given tags reside within output files
                 if (!options.omit_trailing_newline) try context.stream.writer().writeByte('\n');
                 try context.stream.flush();
             },
+
+            .init => for (options.files) |path, index| {
+                try import(path, stdout);
+                if (index + 1 != options.files.len) try stdout.writeByte('\n');
+            },
         }
     }
 
     [[create file with path wrapper]]
+    [[render text indented by four spaces]]
+    [[method for import a file and emit a code block targeting it]]
 
 # Command-line interface
 
@@ -255,6 +265,7 @@ Find where given tags reside within output files
         call,
         graph,
         find,
+        init,
 
         pub const map = std.ComptimeStringMap(Command, .{
             .{ "help", .help },
@@ -263,6 +274,7 @@ Find where given tags reside within output files
             .{ "call", .call },
             .{ "graph", .graph },
             .{ "find", .find },
+            .{ "init", .init },
         });
     };
 
@@ -280,6 +292,7 @@ Find where given tags reside within output files
         graph_line_gradient,
         graph_text_colour,
         @"--",
+        stdin,
 
         pub const map = std.ComptimeStringMap(Flag, .{
             .{ "--allow-absolute-paths", .allow_absolute_paths },
@@ -295,6 +308,7 @@ Find where given tags reside within output files
             .{ "--graph-inherit-line-colour", .graph_inherit_line_colour },
             .{ "--graph-line-gradient=", .graph_line_gradient },
             .{ "--", .@"--" },
+            .{ "--stdin", .stdin },
         });
     };
 
@@ -337,13 +351,31 @@ Find where given tags reside within output files
         \\  --graph-line-gradient=[number]       Set the gradient level
     ;
 
+    const init_help =
+        \\Usage: zangle init [files]
+        \\  --stdin  Read file names from stdin
+    ;
+
     const log = std.log;
 
     fn helpGeneric() void {
-        log.info(tangle_help, .{});
-        log.info(ls_help, .{});
-        log.info(call_help, .{});
-        log.info(graph_help, .{});
+        log.info(
+            \\{s}
+            \\
+            \\{s}
+            \\
+            \\{s}
+            \\
+            \\{s}
+            \\
+            \\{s}
+        , .{
+            tangle_help,
+            ls_help,
+            call_help,
+            graph_help,
+            init_help,
+        });
     }
 
     fn help(com: ?Command, name: ?[]const u8) void {
@@ -360,6 +392,7 @@ Find where given tags reside within output files
             .call => log.info(call_help, .{}),
             .graph => log.info(graph_help, .{}),
             .find => log.info(find_help, .{}),
+            .init => log.info(init_help, .{}),
         }
     }
 
@@ -389,8 +422,10 @@ Find where given tags reside within output files
 
         var interpret_flags_as_files: bool = false;
         var calls = std.ArrayList(Options.FileOrTag).init(gpa);
+        var files = std.ArrayList([]const u8).init(gpa);
         var graph_colours = std.ArrayList(u24).init(gpa);
         var graph_colours_set = false;
+        var files_on_stdin = false;
 
         options.command = command.?;
 
@@ -457,8 +492,13 @@ Find where given tags reside within output files
                         .@"--" => interpret_flags_as_files = true,
                         else => return error.@"Unknown command-line flag",
                     },
+
+                    .init => switch (flag) {
+                        .stdin => files_on_stdin = true,
+                        else => return error.@"Unknown command-line flag",
+                    },
                 }
-            } else {
+            } else if (options.command != .init) {
                 std.log.info("compiling {s}", .{arg});
                 const text = try fs.cwd().readFileAlloc(gpa, arg, 0x7fff_ffff);
 
@@ -480,10 +520,24 @@ Find where given tags reside within output files
                 const object = p.object(arg);
 
                 objects.append(gpa, object) catch return error.@"Exhausted memory";
+            } else {
+                files.append(arg) catch return error.@"Exhausted memory";
             }
         }
 
+        if (files_on_stdin) {
+            const err = error.@"Exhausted memory";
+            while (stdin.readUntilDelimiterOrEofAlloc(gpa, '\n', fs.MAX_PATH_BYTES) catch return err) |path| {
+                files.append(path) catch return error.@"Exhausted memory";
+            }
+        }
+
+        if (options.command == .init and files.items.len == 0) {
+            return error.@"No files to import specified";
+        }
+
         options.calls = calls.toOwnedSlice();
+        options.files = files.toOwnedSlice();
         if (graph_colours_set) {
             options.graph_colours = graph_colours.toOwnedSlice();
         }
@@ -526,6 +580,82 @@ Find where given tags reside within output files
 
         log.info("writing file: {s}", .{filename});
         return try fs.cwd().createFile(filename, .{ .truncate = true });
+    }
+
+## Setting up existing projects
+
+    lang: zig esc: none tag: #method for import a file and emit a code block targeting it
+    -------------------------------------------------------------------------------------
+
+    fn import(path: []const u8, writer: anytype) !void {
+        var file = try fs.cwd().openFile(path, .{});
+        defer file.close();
+
+        const last = mem.lastIndexOfScalar(u8, path, '/') orelse 0;
+        const lang = if (mem.lastIndexOfScalar(u8, path[last..], '.')) |index|
+            path[last + index + 1 ..]
+        else
+            "unknown";
+
+        var buffered = io.bufferedReader(file.reader());
+        var counting = io.countingWriter(writer);
+        try writer.writeByteNTimes('#', math.clamp(mem.count(u8, path[1..], "/"), 0, 5) + 1);
+        try writer.writeByte(' ');
+        try writer.writeAll(path);
+        try writer.writeAll(" \n\n    ");
+        try counting.writer().print("lang: {s} esc: none file: {s}", .{ lang, path });
+        try writer.writeByte('\n');
+        try writer.writeAll("    ");
+        try writer.writeByteNTimes('-', counting.bytes_written);
+        try writer.writeAll("\n\n");
+        try indent(buffered.reader(), writer);
+    }
+
+<!-- -->
+
+    lang: zig esc: none tag: #render text indented by four spaces
+    -------------------------------------------------------------
+
+    fn indent(reader: anytype, writer: anytype) !void {
+        var buffer: [1 << 12]u8 = undefined;
+        var nl = true;
+
+        while (true) {
+            const len = try reader.read(&buffer);
+            if (len == 0) return;
+            const slice = buffer[0..len];
+            var last: usize = 0;
+            while (mem.indexOfScalarPos(u8, slice, last, '\n')) |index| {
+                if (nl) try writer.writeAll("    ");
+                try writer.writeAll(slice[last..index]);
+                try writer.writeByte('\n');
+                nl = true;
+                last = index + 1;
+            } else if (slice[last..].len != 0) {
+                if (nl) try writer.writeAll("    ");
+                try writer.writeAll(slice[last..]);
+                nl = false;
+            }
+        }
+    }
+
+    test "indent text block" {
+        const source =
+            \\pub fn main() !void {
+            \\    return;
+            \\}
+        ;
+        var buffer: [1024 * 4]u8 = undefined;
+        var in = io.fixedBufferStream(source);
+        var out = io.fixedBufferStream(&buffer);
+
+        try indent(in.reader(), out.writer());
+
+        try testing.expectEqualStrings(
+            \\    pub fn main() !void {
+            \\        return;
+            \\    }
+        , out.getWritten());
     }
 
 # Machine

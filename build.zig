@@ -37,8 +37,10 @@ pub fn build(b: *std.build.Builder) !void {
     run_step.dependOn(&run_cmd.step);
 
     const test_cmd = b.addTest("lib/lib.zig");
+    const test_main_cmd = b.addTest("src/main.zig");
 
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(fmt_check_step);
     test_step.dependOn(&test_cmd.step);
+    test_step.dependOn(&test_main_cmd.step);
 }
