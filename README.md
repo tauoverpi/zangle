@@ -35,6 +35,10 @@ Find where given tags reside within output files
 
     $ zangle find README.md --tag='parser codegen' --tag='command-line parser'
 
+Create a new literate document from existing files
+
+    $ find src lib -name '*.zig' | zangle init build.zig --stdin > Zangle.md
+
 ## As a library
 
     lang: zig esc: none file: lib/lib.zig
