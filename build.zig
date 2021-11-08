@@ -1,4 +1,6 @@
 const std = @import("std");
+const lib = @import("lib/lib.zig");
+const TangleStep = lib.TangleStep;
 
 pub fn build(b: *std.build.Builder) !void {
     // Standard target options allows the person running `zig build` to choose
@@ -26,6 +28,18 @@ pub fn build(b: *std.build.Builder) !void {
     wa.setTarget(.{ .cpu_arch = .wasm32, .os_tag = .freestanding });
     wa.setBuildMode(mode);
     wa.install();
+
+    const tangle = TangleStep.create(b);
+    tangle.addFile("README.md");
+    const t_exe = b.addExecutableSource("zangle", tangle.getFileSource("src/main.zig"));
+    t_exe.addPackage(.{
+        .name = "lib",
+        .path = tangle.getFileSource("lib/lib.zig"),
+    });
+
+    const tangle_test_step = b.step("test-step", "Test compiling zangle using the build step");
+    tangle_test_step.dependOn(&tangle.step);
+    tangle_test_step.dependOn(&b.addInstallArtifact(t_exe).step);
 
     const run_cmd = exe.run();
     run_cmd.step.dependOn(b.getInstallStep());

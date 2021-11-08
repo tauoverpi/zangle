@@ -49,6 +49,8 @@ Create a new literate document from existing files
     pub const Linker = @import("Linker.zig");
     pub const Instruction = @import("Instruction.zig");
     pub const Interpreter = @import("Interpreter.zig");
+    pub const context = @import("context.zig");
+    pub const TangleStep = @import("TangleStep.zig");
 
     test {
         _ = Tokenizer;
@@ -88,6 +90,8 @@ Create a new literate document from existing files
     const Interpreter = lib.Interpreter;
     const GraphContext = @import("GraphContext.zig");
     const FindContext = @import("FindContext.zig");
+    const BufferedWriter = io.BufferedWriter(4096, fs.File.Writer);
+    const FileContext = lib.context.StreamContext(BufferedWriter.Writer);
 
     pub const log_level = .info;
 
@@ -120,8 +124,6 @@ Create a new literate document from existing files
     };
 
     [[command-line parser]]
-
-    [[file rendering context]]
 
     pub fn main() void {
         run() catch |err| {
@@ -169,21 +171,20 @@ Create a new literate document from existing files
             },
 
             .call => {
-                var context = FileContext.init(stdout);
+                var buffered: BufferedWriter = .{ .unbuffered_writer = stdout };
+                var context = FileContext.init(buffered.writer());
 
                 for (options.calls) |call| switch (call) {
                     .file => |file| {
                         log.debug("calling file {s}", .{file});
                         try vm.callFile(gpa, file, *FileContext, &context);
-                        if (!options.omit_trailing_newline) try context.stream.writer().writeByte('\n');
+                        if (!options.omit_trailing_newline) try context.stream.writeByte('\n');
                     },
                     .tag => |tag| {
                         log.debug("calling tag {s}", .{tag});
                         try vm.call(gpa, tag, *FileContext, &context);
                     },
                 };
-
-                try context.stream.flush();
             },
 
             .find => for (options.calls) |call| switch (call) {
@@ -193,7 +194,6 @@ Create a new literate document from existing files
                     for (vm.linker.files.keys()) |file| {
                         var context = FindContext.init(gpa, file, tag, stdout);
                         try vm.callFile(gpa, file, *FindContext, &context);
-                        try context.stream.flush();
                     }
                 },
             },
@@ -231,19 +231,17 @@ Create a new literate document from existing files
                 }
 
                 try context.end();
-
-                try context.stream.flush();
             },
 
             .tangle => for (vm.linker.files.keys()) |path| {
                 const file = try createFile(path, options);
                 defer file.close();
 
-                var context = FileContext.init(file.writer());
+                var buffered: BufferedWriter = .{ .unbuffered_writer = file.writer() };
+                var context = FileContext.init(buffered.writer());
 
                 try vm.callFile(gpa, path, *FileContext, &context);
-                if (!options.omit_trailing_newline) try context.stream.writer().writeByte('\n');
-                try context.stream.flush();
+                if (!options.omit_trailing_newline) try context.stream.writeByte('\n');
             },
 
             .init => for (options.files) |path, index| {
@@ -660,6 +658,164 @@ Create a new literate document from existing files
             \\        return;
             \\    }
         , out.getWritten());
+    }
+
+# Build step
+
+    lang: zig esc: none file: lib/TangleStep.zig
+    --------------------------------------------
+
+    const std = @import("std");
+    const lib = @import("lib.zig");
+    const fs = std.fs;
+    const mem = std.mem;
+    const io = std.io;
+
+    const TangleStep = @This();
+    const Allocator = std.mem.Allocator;
+    const Builder = std.build.Builder;
+    const Step = std.build.Step;
+    const Parser = lib.Parser;
+    const Interpreter = lib.Interpreter;
+    const SourceList = std.TailQueue(Source);
+    const FileSource = std.build.FileSource;
+    const GeneratedFile = std.build.GeneratedFile;
+    const BufferedWriter = io.BufferedWriter(4096, fs.File.Writer);
+    const FileContext = lib.context.StreamContext(BufferedWriter.Writer);
+
+    pub const FileList = std.ArrayListUnmanaged([]const u8);
+
+    pub const Source = struct {
+        source: GeneratedFile,
+        path: []const u8,
+    };
+
+    const log = std.log.scoped(.tangle_step);
+
+    vm: Interpreter = .{},
+    output_dir: ?[]const u8 = null,
+    builder: *Builder,
+    files: FileList = .{},
+    sources: SourceList = .{},
+    step: Step,
+
+    pub fn create(b: *Builder) *TangleStep {
+        const self = b.allocator.create(TangleStep) catch @panic("Out of memory");
+        self.* = .{
+            .builder = b,
+            .step = Step.init(.custom, "tangle", b.allocator, make),
+        };
+        return self;
+    }
+
+    pub fn addFile(self: *TangleStep, path: []const u8) void {
+        self.files.append(self.builder.allocator, self.builder.dupe(path)) catch @panic(
+            \\Out of memory
+        );
+    }
+
+    pub fn getFileSource(self: *TangleStep, path: []const u8) FileSource {
+        var it = self.sources.first;
+        while (it) |node| : (it = node.next) {
+            if (std.mem.eql(u8, node.data.path, path))
+                return FileSource{ .generated = &node.data.source };
+        }
+
+        const node = self.builder.allocator.create(SourceList.Node) catch @panic(
+            \\Out of memory
+        );
+        node.* = .{
+            .data = .{
+                .source = .{ .step = &self.step },
+                .path = self.builder.dupe(path),
+            },
+        };
+
+        self.sources.append(node);
+
+        return FileSource{ .generated = &node.data.source };
+    }
+
+    fn make(step: *Step) anyerror!void {
+        const self = @fieldParentPtr(TangleStep, "step", step);
+
+        var hash = std.crypto.hash.blake2.Blake2b384.init(.{});
+
+        for (self.files.items) |path| {
+            const text = try fs.cwd().readFileAlloc(self.builder.allocator, path, 0x7fff_ffff);
+            var p: Parser = .{ .it = .{ .bytes = text } };
+            while (p.step(self.builder.allocator)) |working| {
+                if (!working) break;
+            } else |err| {
+                const location = p.it.locationFrom(.{});
+                log.err("line {d} col {d}: {s}", .{
+                    location.line,
+                    location.column,
+                    @errorName(err),
+                });
+
+                @panic("Failed parsing module");
+            }
+
+            hash.update(path);
+            hash.update(text);
+
+            const object = p.object(path);
+            try self.vm.linker.objects.append(self.builder.allocator, object);
+        }
+
+        try self.vm.linker.link(self.builder.allocator);
+
+        var digest: [48]u8 = undefined;
+        hash.final(&digest);
+
+        var basename: [64]u8 = undefined;
+        _ = std.fs.base64_encoder.encode(&basename, &digest);
+
+        if (self.output_dir == null) {
+            self.output_dir = try fs.path.join(self.builder.allocator, &.{
+                self.builder.cache_root,
+                "o",
+                &basename,
+            });
+        }
+
+        try fs.cwd().makePath(self.output_dir.?);
+
+        var dir = try fs.cwd().openDir(self.output_dir.?, .{});
+        defer dir.close();
+
+        for (self.vm.linker.files.keys()) |path| {
+            if (path.len > 2 and mem.eql(u8, path[0..2], "~/")) {
+                return error.@"Absolute paths are not allowed";
+            } else if (mem.indexOf(u8, path, "../") != null) {
+                return error.@"paths containing ../ are not allowed";
+            }
+
+            if (fs.path.dirname(path)) |sub| try dir.makePath(sub);
+
+            const file = try dir.createFile(path, .{ .truncate = true });
+            defer file.close();
+
+            var buffered: BufferedWriter = .{ .unbuffered_writer = file.writer() };
+            const writer = buffered.writer();
+            var context = FileContext.init(writer);
+            try self.vm.callFile(self.builder.allocator, path, *FileContext, &context);
+            try context.stream.writeByte('\n');
+            try buffered.flush();
+
+            var it = self.sources.first;
+            while (it) |node| : (it = node.next) {
+                if (mem.eql(u8, node.data.path, path)) {
+                    self.sources.remove(node);
+                    node.data.source.path = try fs.path.join(
+                        self.builder.allocator,
+                        &.{ self.output_dir.?, node.data.path },
+                    );
+                    break;
+                }
+            }
+        }
     }
 
 # Machine
@@ -1110,34 +1266,38 @@ Rendering is handled by passing a context in which to run the program.
         }
     };
 
-### File context
+### Stream context
 
-    lang: zig esc: none tag: #file rendering context
-    ------------------------------------------------
+    lang: zig esc: none file: lib/context.zig
+    -----------------------------------------
 
-    const FileContext = struct {
-        stream: Stream,
+    const lib = @import("lib.zig");
 
-        pub const Error = std.os.WriteError;
+    const Interpreter = lib.Interpreter;
 
-        pub const Stream = io.BufferedWriter(1024, std.fs.File.Writer);
+    pub fn StreamContext(comptime Writer: type) type {
+        return struct {
+            stream: Writer,
 
-        pub fn init(writer: fs.File.Writer) FileContext {
-            return .{ .stream = .{ .unbuffered_writer = writer } };
-        }
+            const Self = @This();
 
-        pub fn write(self: *FileContext, vm: *Interpreter, text: []const u8, nl: u16) !void {
-            _ = vm;
-            const writer = self.stream.writer();
-            try writer.writeAll(text);
-            try writer.writeByteNTimes('\n', nl);
-        }
+            pub const Error = Writer.Error;
 
-        pub fn indent(self: *FileContext, vm: *Interpreter) !void {
-            const writer = self.stream.writer();
-            try writer.writeByteNTimes(' ', vm.indent);
-        }
-    };
+            pub fn init(writer: Writer) Self {
+                return .{ .stream = writer };
+            }
+
+            pub fn write(self: *Self, vm: *Interpreter, text: []const u8, nl: u16) !void {
+                _ = vm;
+                try self.stream.writeAll(text);
+                try self.stream.writeByteNTimes('\n', nl);
+            }
+
+            pub fn indent(self: *Self, vm: *Interpreter) !void {
+                try self.stream.writeByteNTimes(' ', vm.indent);
+            }
+        };
+    }
 
 ### Find context
 

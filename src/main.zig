@@ -23,6 +23,8 @@ const Instruction = lib.Instruction;
 const Interpreter = lib.Interpreter;
 const GraphContext = @import("GraphContext.zig");
 const FindContext = @import("FindContext.zig");
+const BufferedWriter = io.BufferedWriter(4096, fs.File.Writer);
+const FileContext = lib.context.StreamContext(BufferedWriter.Writer);
 
 pub const log_level = .info;
 
@@ -349,30 +351,6 @@ fn parseColour(text: []const u8) !u24 {
     }
 }
 
-const FileContext = struct {
-    stream: Stream,
-
-    pub const Error = std.os.WriteError;
-
-    pub const Stream = io.BufferedWriter(1024, std.fs.File.Writer);
-
-    pub fn init(writer: fs.File.Writer) FileContext {
-        return .{ .stream = .{ .unbuffered_writer = writer } };
-    }
-
-    pub fn write(self: *FileContext, vm: *Interpreter, text: []const u8, nl: u16) !void {
-        _ = vm;
-        const writer = self.stream.writer();
-        try writer.writeAll(text);
-        try writer.writeByteNTimes('\n', nl);
-    }
-
-    pub fn indent(self: *FileContext, vm: *Interpreter) !void {
-        const writer = self.stream.writer();
-        try writer.writeByteNTimes(' ', vm.indent);
-    }
-};
-
 pub fn main() void {
     run() catch |err| {
         log.err("{s}", .{@errorName(err)});
@@ -419,21 +397,20 @@ pub fn run() !void {
         },
 
         .call => {
-            var context = FileContext.init(stdout);
+            var buffered: BufferedWriter = .{ .unbuffered_writer = stdout };
+            var context = FileContext.init(buffered.writer());
 
             for (options.calls) |call| switch (call) {
                 .file => |file| {
                     log.debug("calling file {s}", .{file});
                     try vm.callFile(gpa, file, *FileContext, &context);
-                    if (!options.omit_trailing_newline) try context.stream.writer().writeByte('\n');
+                    if (!options.omit_trailing_newline) try context.stream.writeByte('\n');
                 },
                 .tag => |tag| {
                     log.debug("calling tag {s}", .{tag});
                     try vm.call(gpa, tag, *FileContext, &context);
                 },
             };
-
-            try context.stream.flush();
         },
 
         .find => for (options.calls) |call| switch (call) {
@@ -443,7 +420,6 @@ pub fn run() !void {
                 for (vm.linker.files.keys()) |file| {
                     var context = FindContext.init(gpa, file, tag, stdout);
                     try vm.callFile(gpa, file, *FindContext, &context);
-                    try context.stream.flush();
                 }
             },
         },
@@ -481,19 +457,17 @@ pub fn run() !void {
             }
 
             try context.end();
-
-            try context.stream.flush();
         },
 
         .tangle => for (vm.linker.files.keys()) |path| {
             const file = try createFile(path, options);
             defer file.close();
 
-            var context = FileContext.init(file.writer());
+            var buffered: BufferedWriter = .{ .unbuffered_writer = file.writer() };
+            var context = FileContext.init(buffered.writer());
 
             try vm.callFile(gpa, path, *FileContext, &context);
-            if (!options.omit_trailing_newline) try context.stream.writer().writeByte('\n');
-            try context.stream.flush();
+            if (!options.omit_trailing_newline) try context.stream.writeByte('\n');
         },
 
         .init => for (options.files) |path, index| {
