@@ -149,4 +149,15 @@ fn make(step: *Step) anyerror!void {
             }
         }
     }
+
+    if (self.sources.first) |node| {
+        log.err("file not found: {s}", .{node.data.path});
+        var it = node.next;
+
+        while (it) |next| {
+            log.err("file not found: {s}", .{next.data.path});
+        }
+
+        @panic("Files not found");
+    }
 }
