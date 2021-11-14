@@ -411,6 +411,8 @@ pub fn run() !void {
                     try vm.call(gpa, tag, *FileContext, &context);
                 },
             };
+
+            try buffered.flush();
         },
 
         .find => for (options.calls) |call| switch (call) {
