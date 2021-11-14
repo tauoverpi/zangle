@@ -242,6 +242,7 @@ Create a new literate document from existing files
 
                 try vm.callFile(gpa, path, *FileContext, &context);
                 if (!options.omit_trailing_newline) try context.stream.writeByte('\n');
+                try buffered.flush();
             },
 
             .init => for (options.files) |path, index| {
@@ -578,7 +579,7 @@ Create a new literate document from existing files
             return error.@"Absolute paths disabled; use --allow-absolute-paths to enable them.";
         }
 
-        if (fs.path.dirname(filename)) |dir| try fs.cwd().makePath(dir);
+        if (fs.path.dirname(filename)) |dir| fs.cwd().makePath(dir) catch {};
 
         log.info("writing file: {s}", .{filename});
         return try fs.cwd().createFile(filename, .{ .truncate = true });
