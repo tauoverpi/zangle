@@ -484,23 +484,30 @@ fn createFile(path: []const u8, options: Options) !fs.File {
     var tmp: [fs.MAX_PATH_BYTES]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&tmp);
     var filename = path;
+    var absolute = false;
 
     if (filename.len > 2 and mem.eql(u8, filename[0..2], "~/")) {
         filename = try fs.path.join(&fba.allocator, &.{
             os.getenv("HOME") orelse return error.@"unable to find ~/",
             filename[2..],
         });
-
-        log.warn("file with an absolute path: {s}", .{filename});
     }
 
-    if ((path[0] == '/' or path[0] == '~') and !options.allow_absolute_paths) {
-        return error.@"Absolute paths disabled; use --allow-absolute-paths to enable them.";
+    if (path[0] == '/' or path[0] == '~') {
+        if (!options.allow_absolute_paths) {
+            return error.@"Absolute paths disabled; use --allow-absolute-paths to enable them.";
+        } else {
+            absolute = true;
+        }
     }
 
     if (fs.path.dirname(filename)) |dir| fs.cwd().makePath(dir) catch {};
 
-    log.info("writing file: {s}", .{filename});
+    if (absolute) {
+        log.warn("writing file with absolute path: {s}", .{filename});
+    } else {
+        log.info("writing file: {s}", .{filename});
+    }
     return try fs.cwd().createFile(filename, .{ .truncate = true });
 }
 fn indent(reader: anytype, writer: anytype) !void {

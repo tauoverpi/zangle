@@ -78,6 +78,7 @@ pub fn begin(self: *GraphContext, options: GraphOptions) !void {
 
 pub fn end(self: *GraphContext) !void {
     try self.stream.writer().writeAll("}\n");
+    try self.stream.flush();
 }
 
 pub fn call(self: *GraphContext, vm: *Interpreter) !void {
@@ -187,7 +188,7 @@ fn render(self: *GraphContext, name: []const u8) !void {
                     const green = g + gy * i;
                     const blue = b + bz * i;
                     const rgb = @bitCast(u24, @truncate(i24, red << 16 | (green << 8) | (blue & 0xff)));
-                    try writer.print("#{x:0>6};0.{d}:", .{ rgb, 1.0 / @intToFloat(f32, self.gradient) });
+                    try writer.print("#{x:0>6};{d}:", .{ rgb, 1.0 / @intToFloat(f64, self.gradient) });
                 }
             }
 
