@@ -28,7 +28,7 @@ const StackFrame = struct {
 
 const log = std.log.scoped(.vm);
 
-pub fn step(vm: *Interpreter, gpa: *Allocator, comptime T: type, eval: T) !bool {
+pub fn step(vm: *Interpreter, gpa: Allocator, comptime T: type, eval: T) !bool {
     const object = vm.linker.objects.items[vm.module - 1];
     const opcode = object.program.items(.opcode);
     const data = object.program.items(.data);
@@ -115,7 +115,7 @@ fn execCall(
     vm: *Interpreter,
     comptime T: type,
     data: Instruction.Data.Call,
-    gpa: *Allocator,
+    gpa: Allocator,
     eval: T,
 ) (CallError || Child(T).Error)!void {
     if (vm.stack.contains(vm.ip)) {
@@ -220,7 +220,7 @@ const Test = struct {
     }
 };
 
-pub fn deinit(vm: *Interpreter, gpa: *Allocator) void {
+pub fn deinit(vm: *Interpreter, gpa: Allocator) void {
     vm.linker.deinit(gpa);
     vm.stack.deinit(gpa);
 }
@@ -232,7 +232,7 @@ fn Child(comptime T: type) type {
     }
 }
 
-pub fn call(vm: *Interpreter, gpa: *Allocator, symbol: []const u8, comptime T: type, eval: T) !void {
+pub fn call(vm: *Interpreter, gpa: Allocator, symbol: []const u8, comptime T: type, eval: T) !void {
     if (vm.linker.procedures.get(symbol)) |sym| {
         vm.ip = sym.entry;
         vm.module = sym.module;
@@ -242,7 +242,7 @@ pub fn call(vm: *Interpreter, gpa: *Allocator, symbol: []const u8, comptime T: t
     } else return error.@"Unknown procedure";
 }
 
-pub fn callFile(vm: *Interpreter, gpa: *Allocator, symbol: []const u8, comptime T: type, eval: T) !void {
+pub fn callFile(vm: *Interpreter, gpa: Allocator, symbol: []const u8, comptime T: type, eval: T) !void {
     if (vm.linker.files.get(symbol)) |sym| {
         vm.ip = sym.entry;
         vm.module = sym.module;

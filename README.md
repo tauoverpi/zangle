@@ -135,7 +135,7 @@ Create a new literate document from existing files
     pub fn run() !void {
         var vm: Interpreter = .{};
         var instance = std.heap.GeneralPurposeAllocator(.{}){};
-        const gpa = &instance.allocator;
+        const gpa = instance.allocator();
 
         var options = (try parseCli(gpa, &vm.linker.objects)) orelse return;
 
@@ -196,6 +196,7 @@ Create a new literate document from existing files
                     for (vm.linker.files.keys()) |file| {
                         var context = FindContext.init(gpa, file, tag, stdout);
                         try vm.callFile(gpa, file, *FindContext, &context);
+                        try context.stream.flush();
                     }
                 },
             },
@@ -401,7 +402,7 @@ Create a new literate document from existing files
         }
     }
 
-    fn parseCli(gpa: *Allocator, objects: *Linker.Object.List) !?Options {
+    fn parseCli(gpa: Allocator, objects: *Linker.Object.List) !?Options {
         var options: Options = .{ .command = undefined };
         const args = os.argv;
 
@@ -570,7 +571,7 @@ Create a new literate document from existing files
         var absolute = false;
 
         if (filename.len > 2 and mem.eql(u8, filename[0..2], "~/")) {
-            filename = try fs.path.join(&fba.allocator, &.{
+            filename = try fs.path.join(fba.allocator(), &.{
                 os.getenv("HOME") orelse return error.@"unable to find ~/",
                 filename[2..],
             });
@@ -910,7 +911,7 @@ name which is provided as a parameter to rendering contexts.
 
     fn emitRet(
         p: *Parser,
-        gpa: *Allocator,
+        gpa: Allocator,
         params: Instruction.Data.Ret,
     ) !void {
         log.debug("emitting ret", .{});
@@ -1058,7 +1059,7 @@ current module.
 
     fn emitCall(
         p: *Parser,
-        gpa: *Allocator,
+        gpa: Allocator,
         tag: []const u8,
         params: Instruction.Data.Call,
     ) !void {
@@ -1090,7 +1091,7 @@ current module.
         vm: *Interpreter,
         comptime T: type,
         data: Instruction.Data.Call,
-        gpa: *Allocator,
+        gpa: Allocator,
         eval: T,
     ) (CallError || Child(T).Error)!void {
         if (vm.stack.contains(vm.ip)) {
@@ -1145,7 +1146,7 @@ for filtering rendered content within the given block.
 
     fn emitShell(
         p: *Parser,
-        gpa: *Allocator,
+        gpa: Allocator,
         params: Instruction.Data.Shell,
     ) !void {
         log.debug("emitting shell command", .{});
@@ -1197,7 +1198,7 @@ A trail of newline characters is emitted after the text as specified in the
 
     fn emitWrite(
         p: *Parser,
-        gpa: *Allocator,
+        gpa: Allocator,
         params: Instruction.Data.Write,
     ) !void {
         log.debug("emitting write {x:0>8} len {d} nl {d}", .{
@@ -1342,7 +1343,7 @@ Rendering is handled by passing a context in which to run the program.
     stack: Stack = .{},
     filename: []const u8,
     tag: []const u8,
-    gpa: *Allocator,
+    gpa: Allocator,
 
     const log = std.log.scoped(.find_context);
 
@@ -1357,7 +1358,7 @@ Rendering is handled by passing a context in which to run the program.
         column: u32,
     };
 
-    pub fn init(gpa: *Allocator, file: []const u8, tag: []const u8, writer: fs.File.Writer) FindContext {
+    pub fn init(gpa: Allocator, file: []const u8, tag: []const u8, writer: fs.File.Writer) FindContext {
         return .{
             .stream = .{ .unbuffered_writer = writer },
             .filename = file,
@@ -1428,7 +1429,7 @@ Rendering is handled by passing a context in which to run the program.
     stream: Stream,
     stack: Stack = .{},
     omit: Omit = .{},
-    gpa: *Allocator,
+    gpa: Allocator,
     colour: u8 = 0,
     target: Target = .{},
     text_colour: u24 = 0,
@@ -1453,7 +1454,7 @@ Rendering is handled by passing a context in which to run the program.
 
     pub const Stream = io.BufferedWriter(1024, std.fs.File.Writer);
 
-    pub fn init(gpa: *Allocator, writer: fs.File.Writer) GraphContext {
+    pub fn init(gpa: Allocator, writer: fs.File.Writer) GraphContext {
         return .{
             .stream = .{ .unbuffered_writer = writer },
             .gpa = gpa,
@@ -1673,7 +1674,7 @@ and inserts the results in the node's `color` list to create the effect.
 
     const log = std.log.scoped(.vm);
 
-    pub fn step(vm: *Interpreter, gpa: *Allocator, comptime T: type, eval: T) !bool {
+    pub fn step(vm: *Interpreter, gpa: Allocator, comptime T: type, eval: T) !bool {
         const object = vm.linker.objects.items[vm.module - 1];
         const opcode = object.program.items(.opcode);
         const data = object.program.items(.data);
@@ -1694,7 +1695,7 @@ and inserts the results in the node's `color` list to create the effect.
 
     [[interpreter step]]
 
-    pub fn deinit(vm: *Interpreter, gpa: *Allocator) void {
+    pub fn deinit(vm: *Interpreter, gpa: Allocator) void {
         vm.linker.deinit(gpa);
         vm.stack.deinit(gpa);
     }
@@ -1706,7 +1707,7 @@ and inserts the results in the node's `color` list to create the effect.
         }
     }
 
-    pub fn call(vm: *Interpreter, gpa: *Allocator, symbol: []const u8, comptime T: type, eval: T) !void {
+    pub fn call(vm: *Interpreter, gpa: Allocator, symbol: []const u8, comptime T: type, eval: T) !void {
         if (vm.linker.procedures.get(symbol)) |sym| {
             vm.ip = sym.entry;
             vm.module = sym.module;
@@ -1716,7 +1717,7 @@ and inserts the results in the node's `color` list to create the effect.
         } else return error.@"Unknown procedure";
     }
 
-    pub fn callFile(vm: *Interpreter, gpa: *Allocator, symbol: []const u8, comptime T: type, eval: T) !void {
+    pub fn callFile(vm: *Interpreter, gpa: Allocator, symbol: []const u8, comptime T: type, eval: T) !void {
         if (vm.linker.files.get(symbol)) |sym| {
             vm.ip = sym.entry;
             vm.module = sym.module;
@@ -1761,7 +1762,7 @@ and inserts the results in the node's `color` list to create the effect.
 
     const log = std.log.scoped(.linker);
 
-    pub fn deinit(l: *Linker, gpa: *Allocator) void {
+    pub fn deinit(l: *Linker, gpa: Allocator) void {
         for (l.objects.items) |*obj| obj.deinit(gpa);
         l.objects.deinit(gpa);
         l.procedures.deinit(gpa);
@@ -1794,7 +1795,7 @@ and inserts the results in the node's `color` list to create the effect.
             location: Tokenizer.Location,
         };
 
-        pub fn deinit(self: *Object, gpa: *Allocator) void {
+        pub fn deinit(self: *Object, gpa: Allocator) void {
             self.program.deinit(gpa);
 
             for (self.symbols.values()) |*entry| entry.deinit(gpa);
@@ -1944,7 +1945,7 @@ TODO: short-circuit on non local module end
     lang: zig esc: none tag: #linker build procedure table method
     -------------------------------------------------------------
 
-    fn buildProcedureTable(l: *Linker, gpa: *Allocator) !void {
+    fn buildProcedureTable(l: *Linker, gpa: Allocator) !void {
         log.debug("building procedure table", .{});
         for (l.objects.items) |obj, module| {
             log.debug("processing module {d} with {d} procedures", .{ module + 1, obj.adjacent.keys().len });
@@ -1995,7 +1996,7 @@ TODO: short-circuit on non local module end
     lang: zig esc: none tag: #linker build file table method
     --------------------------------------------------------
 
-    fn buildFileTable(l: *Linker, gpa: *Allocator) !void {
+    fn buildFileTable(l: *Linker, gpa: Allocator) !void {
         for (l.objects.items) |obj, module| {
             for (obj.files.keys()) |key, i| {
                 const file = try l.files.getOrPut(gpa, key);
@@ -2013,7 +2014,7 @@ TODO: short-circuit on non local module end
     lang: zig esc: none tag: #linker link method
     --------------------------------------------
 
-    pub fn link(l: *Linker, gpa: *Allocator) !void {
+    pub fn link(l: *Linker, gpa: Allocator) !void {
         l.procedures.clearRetainingCapacity();
         l.files.clearRetainingCapacity();
 
@@ -2105,7 +2106,7 @@ TODO: short-circuit on non local module end
     const Token = Tokenizer.Token;
     const log = std.log.scoped(.parser);
 
-    pub fn deinit(p: *Parser, gpa: *Allocator) void {
+    pub fn deinit(p: *Parser, gpa: Allocator) void {
         p.program.deinit(gpa);
         for (p.symbols.values()) |*entry| entry.deinit(gpa);
         p.symbols.deinit(gpa);
@@ -2710,7 +2711,7 @@ TODO: link tags to their definition
     lang: zig esc: none tag: #zangle parser
     ---------------------------------------
 
-    fn parseBody(p: *Parser, gpa: *Allocator, header: Header) !void {
+    fn parseBody(p: *Parser, gpa: Allocator, header: Header) !void {
         log.debug("begin parsing body", .{});
         defer log.debug("end parsing body", .{});
 
@@ -2829,7 +2830,7 @@ TODO: link tags to their definition
 
     fn parseDelimiter(
         p: *Parser,
-        gpa: *Allocator,
+        gpa: Allocator,
         delim: []const u8,
         indent: usize,
     ) !void {
@@ -2969,7 +2970,7 @@ Pipes pass code blocks through external programs.
         try testing.expect(p.symbols.contains(". . ."));
     }
 
-    pub fn parse(gpa: *Allocator, name: []const u8, text: []const u8) !Linker.Object {
+    pub fn parse(gpa: Allocator, name: []const u8, text: []const u8) !Linker.Object {
         var p: Parser = .{ .it = .{ .bytes = text } };
         errdefer p.deinit(gpa);
 
@@ -2996,7 +2997,7 @@ Pipes pass code blocks through external programs.
         };
     }
 
-    pub fn step(p: *Parser, gpa: *Allocator) !bool {
+    pub fn step(p: *Parser, gpa: Allocator) !bool {
         while (p.next()) |token| if (token.tag == .nl and token.len() >= 2) {
             const space = p.eat(.space, @src()) orelse continue;
             if (space.len != 4) continue;
@@ -3607,7 +3608,7 @@ Pipes pass code blocks through external programs.
     var vm: Interpreter = .{};
     var instance = std.heap.GeneralPurposeAllocator(.{}){};
     var output: ArrayList(u8) = undefined;
-    const gpa = &instance.allocator;
+    const gpa = instance.allocator();
 
     pub export fn init() void {
         output = ArrayList(u8).init(gpa);

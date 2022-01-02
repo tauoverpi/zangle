@@ -13,7 +13,7 @@ const GraphContext = @This();
 stream: Stream,
 stack: Stack = .{},
 omit: Omit = .{},
-gpa: *Allocator,
+gpa: Allocator,
 colour: u8 = 0,
 target: Target = .{},
 text_colour: u24 = 0,
@@ -38,7 +38,7 @@ pub const Pair = struct {
 
 pub const Stream = io.BufferedWriter(1024, std.fs.File.Writer);
 
-pub fn init(gpa: *Allocator, writer: fs.File.Writer) GraphContext {
+pub fn init(gpa: Allocator, writer: fs.File.Writer) GraphContext {
     return .{
         .stream = .{ .unbuffered_writer = writer },
         .gpa = gpa,

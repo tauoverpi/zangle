@@ -26,7 +26,7 @@ const Procedure = struct {
 
 const log = std.log.scoped(.linker);
 
-pub fn deinit(l: *Linker, gpa: *Allocator) void {
+pub fn deinit(l: *Linker, gpa: Allocator) void {
     for (l.objects.items) |*obj| obj.deinit(gpa);
     l.objects.deinit(gpa);
     l.procedures.deinit(gpa);
@@ -59,7 +59,7 @@ pub const Object = struct {
         location: Tokenizer.Location,
     };
 
-    pub fn deinit(self: *Object, gpa: *Allocator) void {
+    pub fn deinit(self: *Object, gpa: Allocator) void {
         self.program.deinit(gpa);
 
         for (self.symbols.values()) |*entry| entry.deinit(gpa);
@@ -187,7 +187,7 @@ test "merge" {
     );
 }
 
-fn buildProcedureTable(l: *Linker, gpa: *Allocator) !void {
+fn buildProcedureTable(l: *Linker, gpa: Allocator) !void {
     log.debug("building procedure table", .{});
     for (l.objects.items) |obj, module| {
         log.debug("processing module {d} with {d} procedures", .{ module + 1, obj.adjacent.keys().len });
@@ -228,7 +228,7 @@ fn updateProcedureCalls(l: *Linker) void {
     }
 }
 
-fn buildFileTable(l: *Linker, gpa: *Allocator) !void {
+fn buildFileTable(l: *Linker, gpa: Allocator) !void {
     for (l.objects.items) |obj, module| {
         for (obj.files.keys()) |key, i| {
             const file = try l.files.getOrPut(gpa, key);
@@ -241,7 +241,7 @@ fn buildFileTable(l: *Linker, gpa: *Allocator) !void {
     }
 }
 
-pub fn link(l: *Linker, gpa: *Allocator) !void {
+pub fn link(l: *Linker, gpa: Allocator) !void {
     l.procedures.clearRetainingCapacity();
     l.files.clearRetainingCapacity();
 

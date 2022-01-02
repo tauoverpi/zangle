@@ -15,7 +15,7 @@ column: u32 = 1,
 stack: Stack = .{},
 filename: []const u8,
 tag: []const u8,
-gpa: *Allocator,
+gpa: Allocator,
 
 const log = std.log.scoped(.find_context);
 
@@ -30,7 +30,7 @@ pub const Location = struct {
     column: u32,
 };
 
-pub fn init(gpa: *Allocator, file: []const u8, tag: []const u8, writer: fs.File.Writer) FindContext {
+pub fn init(gpa: Allocator, file: []const u8, tag: []const u8, writer: fs.File.Writer) FindContext {
     return .{
         .stream = .{ .unbuffered_writer = writer },
         .filename = file,

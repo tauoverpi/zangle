@@ -194,7 +194,7 @@ fn help(com: ?Command, name: ?[]const u8) void {
     }
 }
 
-fn parseCli(gpa: *Allocator, objects: *Linker.Object.List) !?Options {
+fn parseCli(gpa: Allocator, objects: *Linker.Object.List) !?Options {
     var options: Options = .{ .command = undefined };
     const args = os.argv;
 
@@ -361,7 +361,7 @@ pub fn main() void {
 pub fn run() !void {
     var vm: Interpreter = .{};
     var instance = std.heap.GeneralPurposeAllocator(.{}){};
-    const gpa = &instance.allocator;
+    const gpa = instance.allocator();
 
     var options = (try parseCli(gpa, &vm.linker.objects)) orelse return;
 
@@ -422,6 +422,7 @@ pub fn run() !void {
                 for (vm.linker.files.keys()) |file| {
                     var context = FindContext.init(gpa, file, tag, stdout);
                     try vm.callFile(gpa, file, *FindContext, &context);
+                    try context.stream.flush();
                 }
             },
         },
@@ -487,7 +488,7 @@ fn createFile(path: []const u8, options: Options) !fs.File {
     var absolute = false;
 
     if (filename.len > 2 and mem.eql(u8, filename[0..2], "~/")) {
-        filename = try fs.path.join(&fba.allocator, &.{
+        filename = try fs.path.join(fba.allocator(), &.{
             os.getenv("HOME") orelse return error.@"unable to find ~/",
             filename[2..],
         });

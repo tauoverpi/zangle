@@ -8,7 +8,7 @@ const ArrayList = std.ArrayList;
 var vm: Interpreter = .{};
 var instance = std.heap.GeneralPurposeAllocator(.{}){};
 var output: ArrayList(u8) = undefined;
-const gpa = &instance.allocator;
+const gpa = instance.allocator();
 
 pub export fn init() void {
     output = ArrayList(u8).init(gpa);

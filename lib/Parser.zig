@@ -21,7 +21,7 @@ location: Location = .{},
 const Token = Tokenizer.Token;
 const log = std.log.scoped(.parser);
 
-pub fn deinit(p: *Parser, gpa: *Allocator) void {
+pub fn deinit(p: *Parser, gpa: Allocator) void {
     p.program.deinit(gpa);
     for (p.symbols.values()) |*entry| entry.deinit(gpa);
     p.symbols.deinit(gpa);
@@ -32,7 +32,7 @@ pub fn deinit(p: *Parser, gpa: *Allocator) void {
 
 fn emitRet(
     p: *Parser,
-    gpa: *Allocator,
+    gpa: Allocator,
     params: Instruction.Data.Ret,
 ) !void {
     log.debug("emitting ret", .{});
@@ -57,7 +57,7 @@ fn writeJmp(
 }
 fn emitCall(
     p: *Parser,
-    gpa: *Allocator,
+    gpa: Allocator,
     tag: []const u8,
     params: Instruction.Data.Call,
 ) !void {
@@ -76,7 +76,7 @@ fn emitCall(
 }
 fn emitShell(
     p: *Parser,
-    gpa: *Allocator,
+    gpa: Allocator,
     params: Instruction.Data.Shell,
 ) !void {
     log.debug("emitting shell command", .{});
@@ -87,7 +87,7 @@ fn emitShell(
 }
 fn emitWrite(
     p: *Parser,
-    gpa: *Allocator,
+    gpa: Allocator,
     params: Instruction.Data.Write,
 ) !void {
     log.debug("emitting write {x:0>8} len {d} nl {d}", .{
@@ -368,7 +368,7 @@ fn parseHeaderLine(p: *Parser) ParseHeaderError!Header {
 
     return header;
 }
-fn parseBody(p: *Parser, gpa: *Allocator, header: Header) !void {
+fn parseBody(p: *Parser, gpa: Allocator, header: Header) !void {
     log.debug("begin parsing body", .{});
     defer log.debug("end parsing body", .{});
 
@@ -481,7 +481,7 @@ fn parseBody(p: *Parser, gpa: *Allocator, header: Header) !void {
 }
 fn parseDelimiter(
     p: *Parser,
-    gpa: *Allocator,
+    gpa: Allocator,
     delim: []const u8,
     indent: usize,
 ) !void {
@@ -607,7 +607,7 @@ test "compile single tag" {
     try testing.expect(p.symbols.contains(". . ."));
 }
 
-pub fn parse(gpa: *Allocator, name: []const u8, text: []const u8) !Linker.Object {
+pub fn parse(gpa: Allocator, name: []const u8, text: []const u8) !Linker.Object {
     var p: Parser = .{ .it = .{ .bytes = text } };
     errdefer p.deinit(gpa);
 
@@ -634,7 +634,7 @@ pub fn object(p: *Parser, name: []const u8) Linker.Object {
     };
 }
 
-pub fn step(p: *Parser, gpa: *Allocator) !bool {
+pub fn step(p: *Parser, gpa: Allocator) !bool {
     while (p.next()) |token| if (token.tag == .nl and token.len() >= 2) {
         const space = p.eat(.space, @src()) orelse continue;
         if (space.len != 4) continue;
