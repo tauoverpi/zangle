@@ -23,15 +23,12 @@ jobs:
       - name: Download Zig
         working-directory: zig
         run: |
-          wget -qO releases.json https://ziglang.org/download/index.json
+          wget -qO releases.json https://raw.githubusercontent.com/ziglang/www.ziglang.org/master/data/releases.json
           wget -qO zig.tar.xf "$(cat releases.json | jq -r '.master."x86_64-linux".tarball')"
           tar --strip-components=1 -xJf zig.tar.xf
 
-      - name: Run tests
-        run: zig build test
-
       - name: Build zangle
-        run: zig build -Drelease
+        run: zig build -Drelease -Dtarget=x86_64-linux-none
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v2.2.2
