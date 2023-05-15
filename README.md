@@ -7,7 +7,6 @@ markdown and other types of text documents into separate files ready for
 compilation.
 
 NOTE: Currently zangle only supports markdown.
-NOTE: This project has moved to https://git.sr.ht/~tauoverpi/levy however this remains the official issue tracker.
 
 ### Building
 
