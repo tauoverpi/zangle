@@ -8,7 +8,14 @@ compilation.
 
 NOTE: Currently zangle only supports markdown.
 
+### Community
+
+- matrix: https://matrix.to/#/#zangle:tchncs.de
+
 ### Building
+
+- minimal requirements:
+   + 0.11.0-dev.3138+87de8212a or higher
 
 ```
 $ zig build -Drelease
