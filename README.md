@@ -88,8 +88,8 @@ for all code included in the final game.
 
     .dependencies = .{
         .zangle = .{
-            .url = "https://git.sr.ht/~tauoverpi/levy/archive/935578e5c70bc44e056e673a8b9ef3f0388cc961.tar.gz",
-            .hash = "1220ad55840aeaa62b01057f8838fa187bb1463ffbd2476b5ad2a4b2332b9e6f778e",
+            .url = "https://git.sr.ht/~tauoverpi/levy/archive/0002aa7b82f1e78b95c42668a43a2337375b42cc.tar.gz",
+            .hash = "1220cee43eb2a5f3204909b2457a431f2816e1bcceb2eb251d3613808a9a30e85d9f",
         },
     },
 }
