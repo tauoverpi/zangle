@@ -15,7 +15,7 @@ NOTE: Currently zangle only supports markdown.
 ### Building
 
 - minimal requirements:
-   + 0.11.0-dev.3138+87de8212a or higher
+   + 0.11.0-dev.3336+6c2f37455 or higher
 
 ```
 $ zig build -Drelease
