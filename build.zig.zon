@@ -4,8 +4,8 @@
 
     .dependencies = .{
         .zangle = .{
-            .url = "https://git.sr.ht/~tauoverpi/levy/archive/0002aa7b82f1e78b95c42668a43a2337375b42cc.tar.gz",
-            .hash = "1220cee43eb2a5f3204909b2457a431f2816e1bcceb2eb251d3613808a9a30e85d9f",
+            .url = "https://git.sr.ht/~tauoverpi/levy/archive/ca7608f95133453d52ef583733e5dcaf38a1a6d0.tar.gz",
+            .hash = "12208ae2e653de7d996c7deb33357a73439ebdcfe3c9a8ff6b4feda9dbcf2500a399",
         },
     },
 }

@@ -15,7 +15,7 @@ NOTE: Currently zangle only supports markdown.
 ### Building
 
 - minimal requirements:
-   + 0.11.0-dev.3336+6c2f37455 or higher
+   + 0.11.0-dev.4410+76f7b40e1 or higher
 
 ```
 $ zig build -Drelease
@@ -88,8 +88,7 @@ for all code included in the final game.
 
     .dependencies = .{
         .zangle = .{
-            .url = "https://git.sr.ht/~tauoverpi/levy/archive/0002aa7b82f1e78b95c42668a43a2337375b42cc.tar.gz",
-            .hash = "1220cee43eb2a5f3204909b2457a431f2816e1bcceb2eb251d3613808a9a30e85d9f",
+            .url = "https://git.sr.ht/~tauoverpi/levy/archive/ca7608f95133453d52ef583733e5dcaf38a1a6d0.tar.gz",
         },
     },
 }
