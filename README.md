@@ -88,7 +88,7 @@ for all code included in the final game.
 
     .dependencies = .{
         .zangle = .{
-            .url = "https://git.sr.ht/~tauoverpi/levy/archive/e440a13392be5eafb03361fa48c0557ad3005859.tar.gz",
+            .url = "https://git.sr.ht/~tauoverpi/levy/archive/b449d537902961e4d5d7704378f00655068d5cf1.tar.gz",
         },
     },
 }
